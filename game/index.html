@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEON HARBOR — an original open-world crime game in Azura Bay</title>
+<style>
+  :root {
+    --ink: #f5f1e8;
+    --muted: #b9c2cc;
+    --accent: #ffb454;
+    --coral: #ff5d8f;
+    --teal: #35c4b5;
+    --gold: #ffe14d;
+    --panel: rgba(13, 20, 28, 0.88);
+    --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1026; color: var(--ink); font-family: var(--font-ui); }
+  #game { position: fixed; inset: 0; }
+  #game canvas { display: block; }
+  .hidden { display: none !important; }
+
+  /* ---------- HUD ---------- */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  #minimap-wrap {
+    position: absolute; left: 18px; bottom: 18px; width: 172px; height: 172px;
+    border: 3px solid rgba(245, 241, 232, 0.85); border-radius: 10px; overflow: hidden;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+  }
+  #minimap { width: 172px; height: 172px; display: block; }
+  #bars { position: absolute; left: 202px; bottom: 26px; width: 190px; }
+  .bar { height: 13px; background: rgba(10, 14, 18, 0.72); border: 1px solid rgba(245,241,232,0.5); border-radius: 3px; margin-top: 5px; overflow: hidden; }
+  .bar > div { height: 100%; transition: width 0.18s ease; }
+  #health-fill { background: #7ed957; }
+  #armor-fill { background: #6db3f2; }
+  #top-right { position: absolute; right: 22px; top: 16px; text-align: right; }
+  #cash { font-size: 30px; font-weight: 800; letter-spacing: 0.5px; color: #9be15d; text-shadow: 0 2px 8px rgba(0,0,0,0.7); }
+  #stars { font-size: 24px; letter-spacing: 3px; color: #8b93a3; text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
+  #stars.hot { color: var(--gold); }
+  #clock { font-size: 15px; color: var(--muted); font-weight: 600; }
+  #weapon { position: absolute; right: 22px; bottom: 22px; font-size: 19px; font-weight: 700; text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
+  #radio { position: absolute; right: 22px; bottom: 50px; font-size: 14px; color: var(--accent); text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
+  #objective {
+    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+    max-width: 62vw; text-align: center; font-size: 17px; font-weight: 650;
+    background: var(--panel); border-left: 4px solid var(--gold);
+    padding: 9px 16px; border-radius: 6px; box-shadow: 0 4px 18px rgba(0,0,0,0.4);
+  }
+  #timer { position: absolute; left: 50%; top: 74px; transform: translateX(-50%); font-size: 26px; font-weight: 800; color: var(--ink); text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
+  #timer.urgent { color: #ff4040; }
+  #toast {
+    position: absolute; left: 50%; top: 118px; transform: translateX(-50%);
+    max-width: 70vw; text-align: center; font-size: 16px; font-weight: 600;
+    background: var(--panel); padding: 8px 18px; border-radius: 20px; color: var(--accent);
+  }
+  #dialogue {
+    position: absolute; left: 50%; bottom: 108px; transform: translateX(-50%);
+    width: min(680px, 86vw); background: var(--panel); border-radius: 8px;
+    padding: 12px 18px 14px; box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+  }
+  #dialogue-name { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.4px; margin-bottom: 4px; }
+  #dialogue-text { font-size: 17px; line-height: 1.45; }
+  #dialogue-hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); opacity: 0.9; }
+  #crosshair i { position: absolute; background: var(--ink); }
+  #crosshair i:nth-child(1) { left: 9px; top: 0; width: 2px; height: 6px; }
+  #crosshair i:nth-child(2) { left: 9px; bottom: 0; width: 2px; height: 6px; }
+  #crosshair i:nth-child(3) { top: 9px; left: 0; height: 2px; width: 6px; }
+  #crosshair i:nth-child(4) { top: 9px; right: 0; height: 2px; width: 6px; }
+  #bust-wrap { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); width: 260px; text-align: center; font-weight: 800; letter-spacing: 2px; color: #ff9040; }
+  #bust-bar { height: 10px; background: rgba(10,14,18,0.7); border: 1px solid rgba(245,241,232,0.6); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+  #bust-fill { height: 100%; background: #ff9040; width: 0; }
+  #prompt {
+    position: absolute; left: 50%; bottom: 210px; transform: translateX(-50%);
+    font-size: 16px; font-weight: 700; background: var(--panel); padding: 7px 16px; border-radius: 16px;
+  }
+
+  /* ---------- Panels ---------- */
+  .panel {
+    position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: radial-gradient(ellipse at 50% 35%, rgba(20, 32, 48, 0.42), rgba(5, 8, 16, 0.86));
+    padding: 24px;
+  }
+  .panel h1 {
+    font-size: clamp(44px, 9vw, 92px); margin: 0; letter-spacing: 2px; font-weight: 900;
+    background: linear-gradient(92deg, var(--coral), var(--accent) 55%, var(--teal));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: none; filter: drop-shadow(0 4px 18px rgba(255, 93, 143, 0.35));
+  }
+  .panel h2 { font-size: clamp(30px, 6vw, 54px); margin: 0 0 8px; letter-spacing: 3px; }
+  .panel .sub { color: var(--muted); font-size: 17px; max-width: 620px; line-height: 1.55; margin: 10px 0 20px; }
+  .panel .story { color: var(--ink); font-size: 16px; max-width: 600px; line-height: 1.6; margin: 0 0 18px; }
+  .btn {
+    pointer-events: auto; cursor: pointer; border: 0; border-radius: 8px;
+    background: linear-gradient(92deg, var(--coral), var(--accent)); color: #1c1206;
+    font-size: 19px; font-weight: 850; padding: 13px 38px; margin: 5px;
+    box-shadow: 0 6px 22px rgba(255, 138, 92, 0.4);
+  }
+  .btn.ghost { background: rgba(245,241,232,0.12); color: var(--ink); box-shadow: none; border: 1px solid rgba(245,241,232,0.4); }
+  .controls { display: grid; grid-template-columns: auto auto; gap: 4px 18px; text-align: left; font-size: 14px; color: var(--muted); margin-top: 18px; }
+  .controls b { color: var(--ink); font-weight: 700; text-align: right; }
+  .big-red { color: #ff4040 !important; -webkit-text-fill-color: #ff4040; }
+  .big-blue { color: #6db3f2 !important; -webkit-text-fill-color: #6db3f2; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
+</head>
+<body>
+<div id="game" aria-label="NEON HARBOR: explore Azura Bay on foot and by car, take jobs, outrun the Bay Precinct"></div>
+
+<div id="hud" class="hidden">
+  <div id="minimap-wrap"><canvas id="minimap" width="172" height="172"></canvas></div>
+  <div id="bars">
+    <div class="bar"><div id="health-fill"></div></div>
+    <div class="bar"><div id="armor-fill"></div></div>
+  </div>
+  <div id="top-right">
+    <div id="cash">$0</div>
+    <div id="stars">☆☆☆☆☆</div>
+    <div id="clock">08:00</div>
+  </div>
+  <div id="objective" class="hidden"></div>
+  <div id="timer" class="hidden"></div>
+  <div id="toast" class="hidden"></div>
+  <div id="radio" class="hidden"></div>
+  <div id="weapon">PISTOL · ∞</div>
+  <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+  <div id="bust-wrap" class="hidden">BUSTED?<div id="bust-bar"><div id="bust-fill"></div></div></div>
+  <div id="prompt" class="hidden"></div>
+  <div id="dialogue" class="hidden">
+    <div id="dialogue-name"></div>
+    <div id="dialogue-text"></div>
+    <div id="dialogue-hint">E — next</div>
+  </div>
+</div>
+
+<section id="title-panel" class="panel">
+  <h1>NEON HARBOR</h1>
+  <p class="story">Azura Bay, a city that never dries off. Rio Santoso drives for Mama Lala —
+  until the Coral Kings take her ledger, her boat money and her nephew. Six jobs stand
+  between Rio and the low tide that settles every debt.</p>
+  <div>
+    <button id="new-btn" class="btn">New Game</button>
+    <button id="continue-btn" class="btn ghost hidden">Continue</button>
+  </div>
+  <p id="continue-note" class="sub"></p>
+  <div class="controls" id="controls-list"></div>
+</section>
+
+<section id="pause-panel" class="panel hidden">
+  <h2>PAUSED</h2>
+  <p class="sub">The bay waits. Your game is saved.</p>
+  <div>
+    <button id="resume-btn" class="btn">Resume</button>
+    <button id="quit-btn" class="btn ghost">Title screen</button>
+  </div>
+  <div class="controls" id="controls-list-2"></div>
+</section>
+
+<section id="wasted-panel" class="panel hidden">
+  <h2 class="big-red">WASTED</h2>
+  <p class="sub" id="wasted-note">Azura General patches Rio up — for a price.</p>
+  <button id="wasted-btn" class="btn">Wake up at the hospital</button>
+</section>
+
+<section id="busted-panel" class="panel hidden">
+  <h2 class="big-blue">BUSTED</h2>
+  <p class="sub" id="busted-note">The Bay Precinct keeps the fine and the lesson.</p>
+  <button id="busted-btn" class="btn">Walk out of the precinct</button>
+</section>
+
+<section id="complete-panel" class="panel hidden">
+  <h2>LOW TIDE</h2>
+  <p class="sub">The ledger, the boat, the bay — all home. Azura Bay is Rio's now:
+  courier runs at the Palm Court Motel pay cash, and the city is yours to drive.</p>
+  <button id="complete-btn" class="btn">Keep driving</button>
+</section>
+
+<p id="status" role="status" aria-live="polite"></p>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
