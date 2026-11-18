@@ -5,6 +5,12 @@
 // Traffic follows the road grid honestly: a car holds a lane on a road line,
 // and at each intersection it may turn onto the crossing road, so the city
 // streams with believable flow instead of cars wandering the pavements.
+//
+// The class also builds motorbikes now: same contract, different animal.
+// A bike is half the width, accelerates harder, tops out faster, turns
+// quicker — and leans into its turns, because a bike that stays bolt
+// upright looks like a filing cabinet on castors. Traffic rides a few, and
+// anything in traffic can be stolen exactly like a car.
 
 import * as THREE from 'three';
 import { CAR, CITY, PALETTE } from './config.js';
@@ -56,14 +62,55 @@ export function buildCarMesh(paint, { cop = false } = {}) {
   return group;
 }
 
+const bikeWheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.11, 12);
+const bikeFrameMat = new THREE.MeshLambertMaterial({ color: 0x22262c });
+
+/** A motorbike: tank, seat, spine and two thin wheels in a line. */
+export function buildBikeMesh(paint, { cop = false } = {}) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshPhongMaterial({ color: paint, shininess: 80 });
+  // Fuel tank and tail, slung low between the wheels; the rider sits over it.
+  const tank = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.3, 0.85), mat);
+  tank.position.set(0, 0.78, 0.18);
+  tank.castShadow = true;
+  const seat = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.8), bikeFrameMat);
+  seat.position.set(0, 0.82, -0.55);
+  const spine = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 1.7), bikeFrameMat);
+  spine.position.set(0, 0.52, 0);
+  const bars = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.07, 0.07), bikeFrameMat);
+  bars.position.set(0, 1.02, 0.78);
+  group.add(tank, seat, spine, bars);
+  if (cop) {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.34, 0.4), new THREE.MeshBasicMaterial({ color: PALETTE.copStripe }));
+    box.position.set(0, 0.95, -0.95);
+    group.add(box);
+  }
+  const wheels = [];
+  for (const wz of [0.92, -0.92]) {
+    const wheel = new THREE.Mesh(bikeWheelGeo, wheelMat);
+    wheel.rotation.z = Math.PI / 2;
+    wheel.position.set(0, 0.34, wz);
+    group.add(wheel);
+    wheels.push(wheel);
+  }
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.13, 0.06), lightMat);
+  head.position.set(0, 0.86, 0.98);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.05), tailMat);
+  tail.position.set(0, 0.8, -1.02);
+  group.add(head, tail);
+  group.userData.wheels = wheels;
+  return group;
+}
+
 let nextCarId = 1;
 
 export class Car {
-  constructor(scene, random, { x, z, heading = 0, paint = null, cop = false, parked = false }) {
+  constructor(scene, random, { x, z, heading = 0, paint = null, cop = false, parked = false, bike = false }) {
     const rng = rngHelpers(random);
     this.id = nextCarId++;
+    this.bike = bike;
     this.paint = paint ?? rng.pick(PALETTE.carPaint);
-    this.mesh = buildCarMesh(this.paint, { cop });
+    this.mesh = bike ? buildBikeMesh(this.paint, { cop }) : buildCarMesh(this.paint, { cop });
     this.mesh.position.set(x, 0, z);
     this.mesh.rotation.y = heading;
     scene.add(this.mesh);
@@ -72,15 +119,21 @@ export class Car {
     this.heading = heading;   // radians; 0 faces +Z, like the mesh
     this.speed = 0;
     this.steer = 0;
-    this.health = 100;
+    this.health = bike ? 70 : 100; // a bike comes apart sooner than a sedan
     this.parked = parked;
     this.driver = null;       // a Person, or 'player', or null when empty
     this.cop = cop;
     this.wrecked = false;
-    this.honkCooldown = 0;
+    this.honkCooldown = rng.range(0, 3);
+    // Per-type physics, read by drive(): bikes launch harder, run faster,
+    // turn sharper and fit through gaps a car cannot.
+    this.accelMul = bike ? 1.5 : 1;
+    this.topSpeed = bike ? 41 : 34;
+    this.turnMul = bike ? 1.3 : 1;
+    this.radius = bike ? 0.72 : CAR.radius;
     // Traffic route state: the road line and direction the car is following.
     this.route = null;
-    this.cruiseSpeed = rng.range(8, 13);
+    this.cruiseSpeed = bike ? rng.range(11, 16.5) : rng.range(8, 13);
     this.waitAt = 0;
   }
 
@@ -89,6 +142,12 @@ export class Car {
   syncMesh() {
     this.mesh.position.set(this.x, 0, this.z);
     this.mesh.rotation.y = this.heading;
+    if (this.bike) {
+      // Lean into the turn, proportional to steer and speed, and settle back
+      // upright as the bike straightens or slows.
+      const lean = clamp(-this.steer * clamp(this.speed / 13, -1, 1), -1, 1) * 0.44;
+      this.mesh.rotation.z = lean;
+    }
     const spin = this.speed * 0.12;
     for (const wheel of this.mesh.userData.wheels) wheel.rotation.x += spin;
   }
@@ -101,7 +160,7 @@ export class Car {
   drive(dt, throttle, steer, colliders, handbrake = false) {
     if (this.wrecked) { this.speed = 0; this.syncMesh(); return 0; }
     const before = Math.abs(this.speed);
-    if (throttle > 0) this.speed += CAR.accel * throttle * dt * (1 - Math.max(0, this.speed) / 34);
+    if (throttle > 0) this.speed += CAR.accel * this.accelMul * throttle * dt * (1 - Math.max(0, this.speed) / this.topSpeed);
     else if (throttle < 0) {
       if (this.speed > 0.5) this.speed -= CAR.brake * dt;
       else this.speed = Math.max(-CAR.reverseMax, this.speed + CAR.accel * throttle * dt);
@@ -109,11 +168,11 @@ export class Car {
     this.speed -= this.speed * CAR.drag * dt * 0.35;
     if (handbrake) this.speed -= this.speed * 1.6 * dt;
     this.steer = steer;
-    const turnRate = CAR.gripTurn * steer * clamp(this.speed / 9, -1, 1) * (handbrake ? 1.5 : 1);
+    const turnRate = CAR.gripTurn * this.turnMul * steer * clamp(this.speed / 9, -1, 1) * (handbrake ? 1.5 : 1);
     this.heading += turnRate * dt;
     const nx = this.x + Math.sin(this.heading) * this.speed * dt;
     const nz = this.z + Math.cos(this.heading) * this.speed * dt;
-    const resolved = resolveCollisions(colliders, nx, nz, CAR.radius);
+    const resolved = resolveCollisions(colliders, nx, nz, this.radius);
     let impact = 0;
     if (Math.abs(resolved.x - nx) > 0.01 || Math.abs(resolved.z - nz) > 0.01) {
       impact = before;
@@ -133,23 +192,36 @@ export class Car {
     if (!this.route) this.pickRoute(world.random);
     const r = this.route;
     // Target point: far along the current road, offset to the driving lane.
-    const lane = 3.6;
+    // Bikes ride a touch closer to the centre line, the way bikes do.
+    const lane = this.bike ? 2.9 : 3.6;
     let tx;
     let tz;
     if (r.axis === 'z') { tx = r.line + lane * r.laneSide; tz = this.z + r.dir * 30; }
     else { tz = r.line + lane * r.laneSide; tx = this.x + r.dir * 30; }
     // Slow for whatever is ahead: another car, or Rio himself in the road.
     let target = this.cruiseSpeed;
+    let blocked = false;
     for (const other of world.cars) {
       if (other === this) continue;
       const gap = (other.x - this.x) * Math.sin(this.heading) + (other.z - this.z) * Math.cos(this.heading);
       const side = Math.abs((other.x - this.x) * Math.cos(this.heading) - (other.z - this.z) * Math.sin(this.heading));
-      if (gap > 0 && gap < 9 && side < 2.2) target = Math.min(target, Math.max(0, (gap - 5) * 1.4));
+      if (gap > 0 && gap < 9 && side < 2.2) {
+        target = Math.min(target, Math.max(0, (gap - 5) * 1.4));
+        if (gap < 7.5) blocked = true;
+      }
     }
     const playerGap = world.player
       ? (world.player.x - this.x) * Math.sin(this.heading) + (world.player.z - this.z) * Math.cos(this.heading)
       : -1;
-    if (playerGap > 0 && playerGap < 8 && !world.player.car) target = Math.min(target, 2);
+    if (playerGap > 0 && playerGap < 8 && !world.player.car) { target = Math.min(target, 2); blocked = true; }
+    // Stuck behind something with a driver-shaped obstacle? Sound the horn —
+    // if the audio module grows one. The hook is deliberately guarded: this
+    // module asks, it does not assume.
+    this.honkCooldown -= dt;
+    if (blocked && this.speed < 1.2 && this.honkCooldown <= 0) {
+      this.honkCooldown = 2.5 + world.random() * 4.5;
+      if (world.audio && typeof world.audio.horn === 'function') world.audio.horn();
+    }
     const wantHeading = Math.atan2(tx - this.x, tz - this.z);
     const steer = clamp(angleDelta(this.heading, wantHeading) * 1.6, -1, 1);
     const throttle = this.speed < target ? 0.75 : -0.4;
@@ -173,13 +245,14 @@ export class Car {
     const vertical = rng.chance(0.5);
     const line = rng.pick(lines);
     const dir = rng.chance(0.5) ? 1 : -1;
+    const lane = this.bike ? 2.9 : 3.6;
     if (vertical) {
       this.route = { axis: 'z', line, dir, laneSide: dir > 0 ? 1 : -1 };
-      this.x = line + 3.6 * this.route.laneSide;
+      this.x = line + lane * this.route.laneSide;
       this.heading = dir > 0 ? 0 : Math.PI;
     } else {
       this.route = { axis: 'x', line, dir, laneSide: dir > 0 ? -1 : 1 };
-      this.z = line + 3.6 * this.route.laneSide;
+      this.z = line + lane * this.route.laneSide;
       this.heading = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
     }
     this.syncMesh();
@@ -191,26 +264,33 @@ export function seedCars(scene, random, count = { parked: 26, traffic: 13 }) {
   const rng = rngHelpers(random);
   const cars = [];
   const lines = roadLines();
-  for (let i = 0; i < count.parked; i += 1) {
-    const vertical = rng.chance(0.5);
-    const line = rng.pick(lines);
-    const along = rng.range(-CITY.extent + 16, CITY.extent - 16);
-    const side = rng.chance(0.5) ? -1 : 1;
-    const off = side * (CITY.roadHalf - 1.9);
-    const x = vertical ? line + off : along;
-    const z = vertical ? along : line + off;
-    if (cars.some((c) => Math.hypot(c.x - x, c.z - z) < 8)) continue;
-    const heading = vertical ? (side > 0 ? 0 : Math.PI) : (side > 0 ? Math.PI / 2 : -Math.PI / 2);
-    cars.push(new Car(scene, random, { x, z, heading, parked: true }));
-  }
-  for (let i = 0; i < count.traffic; i += 1) {
-    const car = new Car(scene, random, { x: 0, z: 0, parked: false });
+  const scatterParked = (bike, howMany) => {
+    for (let i = 0; i < howMany; i += 1) {
+      const vertical = rng.chance(0.5);
+      const line = rng.pick(lines);
+      const along = rng.range(-CITY.extent + 16, CITY.extent - 16);
+      const side = rng.chance(0.5) ? -1 : 1;
+      const off = side * (CITY.roadHalf - 1.9);
+      const x = vertical ? line + off : along;
+      const z = vertical ? along : line + off;
+      if (cars.some((c) => Math.hypot(c.x - x, c.z - z) < 8)) continue;
+      const heading = vertical ? (side > 0 ? 0 : Math.PI) : (side > 0 ? Math.PI / 2 : -Math.PI / 2);
+      cars.push(new Car(scene, random, { x, z, heading, parked: true, bike }));
+    }
+  };
+  scatterParked(false, count.parked);
+  scatterParked(true, 4); // a few bikes racked at the kerb, keys of course in
+  const startTraffic = (bike) => {
+    const car = new Car(scene, random, { x: 0, z: 0, parked: false, bike });
     car.pickRoute(random);
+    const lane = bike ? 2.9 : 3.6;
     car.z = rng.range(-CITY.extent + 20, CITY.extent - 20);
-    car.x = car.route.axis === 'z' ? car.route.line + 3.6 * car.route.laneSide : rng.range(-CITY.extent + 20, CITY.extent - 20);
-    if (car.route.axis === 'x') car.z = car.route.line + 3.6 * car.route.laneSide;
+    car.x = car.route.axis === 'z' ? car.route.line + lane * car.route.laneSide : rng.range(-CITY.extent + 20, CITY.extent - 20);
+    if (car.route.axis === 'x') car.z = car.route.line + lane * car.route.laneSide;
     car.driver = 'traffic';
     cars.push(car);
-  }
+  };
+  for (let i = 0; i < count.traffic; i += 1) startTraffic(false);
+  for (let i = 0; i < 4; i += 1) startTraffic(true); // bikes weave the same grid
   return cars;
 }

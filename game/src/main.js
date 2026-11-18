@@ -1,11 +1,15 @@
 // NEON HARBOR — boot, the Game that owns every system, and the one loop.
-// The world is Azura Bay: a seeded three.js city (city.js) with traffic
-// (vehicles.js), pedestrians and a hero (people.js), a wanted system and its
-// police (police.js), hitscan combat (combat.js), a six-chapter story
-// (missions.js), a DOM HUD with a live minimap (hud.js), synthesised sound
-// (audio.js) and a localStorage save (save.js). This file wires them
-// together, runs the camera, the day, and the moments between systems:
-// stealing a car, getting wasted, getting busted, paying for a respray.
+// The world is Azura Bay: a seeded three.js city (city.js) with traffic —
+// cars and motorbikes (vehicles.js), pedestrians and a hero (people.js), a
+// wanted system and its police, roadblocks and all (police.js), hitscan
+// combat (combat.js), a seven-chapter story (missions.js), weather that
+// rolls in off the sea (weather.js), a DOM HUD with a live minimap (hud.js),
+// synthesised sound (audio.js) and a localStorage save (save.js). This file
+// wires them together, runs the camera, the day, and the moments between
+// systems: stealing a car, getting wasted, getting busted, paying for a
+// respray. Weather is applied here, over the painted sky: thunder lifts the
+// hemisphere light for a frame, cloud eats the sun, and the roads darken
+// as they soak — main.js owns the materials, weather owns the mood.
 //
 // ?seed=N fixes the city. ?shot=<name>&seed=N stages a screenshot scene
 // (shots.js) instead of the title screen.
@@ -21,6 +25,7 @@ import { Combat } from './combat.js';
 import { MissionEngine, SIDE_JOB } from './missions.js';
 import { Hud, showPanel, fillTitle } from './hud.js';
 import { createAudio } from './audio.js';
+import { createWeather } from './weather.js';
 import { createInput, ACT_INTERACT, ACT_VEHICLE, ACT_PAUSE, ACT_RADIO, ACT_MUTE, ACT_CONFIRM } from './input.js';
 import { defaultSave, loadSave, storeSave, clearSave } from './save.js';
 import { stageShot } from './shots.js';
@@ -71,6 +76,19 @@ class Game {
     const city = buildCity(this.scene, this.random);
     this.city = city;
     this.colliders = city.colliders;
+
+    // Weather over the bay, and the road surface it soaks: every road mesh
+    // shares one material, so finding it once lets a storm darken the whole
+    // grid as the wetness climbs (and lets it dry back in the sun).
+    this.weather = createWeather(this.scene, this.camera, this.random);
+    this.roadDry = new THREE.Color(PALETTE.road);
+    this.roadWet = new THREE.Color(0x16181d);
+    this.roadMaterial = null;
+    city.group.traverse((obj) => {
+      if (this.roadMaterial || !obj.isMesh) return;
+      const mat = obj.material;
+      if (mat && mat.color && !mat.map && mat.color.getHex() === PALETTE.road) this.roadMaterial = mat;
+    });
 
     this.existingSave = loadSave();
     this.save = defaultSave();
@@ -308,7 +326,7 @@ class Game {
       return 'F — get out';
     }
     const near = this.nearestCar(player.x, player.z, 4.4);
-    if (near && !near.wrecked) return 'F — steal this car';
+    if (near && !near.wrecked) return near.bike ? 'F — steal this bike' : 'F — steal this car';
     const start = this.missions.startLandmark();
     if (start && !this.missions.active && this.missions.nextMission()
       && Math.hypot(player.x - start.x, player.z - start.z) < 5.5) {
@@ -430,6 +448,15 @@ class Game {
     this.elapsed += dt;
     this.timeOfDay = (this.timeOfDay + dt / DAY_LENGTH_SECONDS) % 1;
     this.updateSky();
+    // Weather rides over the sky the clock just painted: fronts grey it,
+    // thunder flashes through the hemisphere light, cloud thins the sun,
+    // and soaked roads darken toward wet asphalt.
+    this.weather.update(dt, this.state === 'title' ? { x: 0, z: 0 } : this.player);
+    this.hemi.intensity = clamp(this.hemi.intensity + this.weather.flash * 1.5 - this.weather.cloudiness * 0.2, 0.06, 2.4);
+    this.sun.intensity *= 1 - this.weather.cloudiness * 0.45;
+    if (this.roadMaterial) {
+      this.roadMaterial.color.copy(this.roadDry).lerp(this.roadWet, this.weather.wetness * 0.85);
+    }
     // Traffic and street life always move; the story only moves in play.
     for (const car of this.cars) {
       if (car.driver === 'traffic') car.trafficStep(dt, this);
@@ -506,7 +533,8 @@ class Game {
       for (const person of this.people) {
         if (person.dead || person === this.player || person.car) continue;
         if (person.knockTimer > 0) continue;
-        if (Math.hypot(person.x - car.x, person.z - car.z) < 1.8) {
+        // A bike's killing zone is narrower than a car's — it threads gaps.
+        if (Math.hypot(person.x - car.x, person.z - car.z) < (car.bike ? 1.25 : 1.8)) {
           person.knockTimer = 1.2;
           person.hurt(58, this);
           car.speed *= 0.55;
@@ -527,8 +555,9 @@ class Game {
         const dx = b.x - a.x;
         const dz = b.z - a.z;
         const dist = Math.hypot(dx, dz);
-        if (dist < 3.4 && dist > 0.01) {
-          const push = (3.4 - dist) / 2;
+        const minDist = (a.bike || b.bike) ? 2.3 : 3.4;
+        if (dist < minDist && dist > 0.01) {
+          const push = (minDist - dist) / 2;
           const nx = dx / dist;
           const nz = dz / dist;
           if (a !== this.player.car) { a.x -= nx * push; a.z -= nz * push; }

@@ -1,8 +1,15 @@
 // People: Rio, the pedestrians of Azura Bay, and the officers who chase him
 // share one low-poly humanoid build and one walk cycle — what differs is the
 // clothes, the orders they are following and what happens when they are hit.
-// A Person is a small state machine (walk, flee, chase, down) the game's
-// systems steer through intents, never by reaching into the mesh directly.
+// A Person is a small state machine (walk, flee, cower, chase, aim, down)
+// the game's systems steer through intents, never by reaching into the mesh
+// directly.
+//
+// The street also has nerves now. A pedestrian carries a `nerve` trait rolled
+// at spawn: when gunfire cracks or a car screams past, the steady ones run
+// and the rest drop into a cower until the noise moves on. Fighters — Coral
+// Kings in a shootout, officers on duty — do not scatter; being shot makes a
+// King angry, not gone, which is what keeps a firefight a firefight.
 
 import * as THREE from 'three';
 import { CITY, PALETTE, PLAYER } from './config.js';
@@ -58,6 +65,7 @@ let nextPersonId = 1;
 export class Person {
   constructor(scene, random, { x, z, cop = false, hero = false, name = '' }) {
     const rng = rngHelpers(random);
+    this.rng = rng;            // kept: reactions roll dice long after spawn
     this.id = nextPersonId++;
     this.name = name;
     this.cop = cop;
@@ -73,12 +81,16 @@ export class Person {
     this.z = z;
     this.heading = rng.range(0, Math.PI * 2);
     this.health = cop ? 60 : 40;
-    this.state = 'walk';       // walk | flee | chase | aim | down | seated
+    this.state = 'walk';       // walk | flee | cower | chase | aim | hostile | down | seated
     this.speed = 0;
     this.walkPhase = rng.range(0, 6);
     this.target = null;        // {x, z} the walker is heading for
     this.fleeFrom = null;
     this.fleeTimer = 0;
+    this.cowerTimer = 0;       // seconds left ducked down with hands up
+    this.scanTimer = rng.range(0, 0.3); // staggers the crowd's threat checks
+    this.knockTimer = 0;       // brief immunity after a car clips this person
+    this.nerve = rng.next();   // low nerve cowers, high nerve runs, both live
     this.shootCooldown = rng.range(0.5, 1.5);
     this.dead = false;
     this.car = null;           // the Car this person is driving, if any
@@ -88,6 +100,11 @@ export class Person {
 
   get pos() { return this.mesh.position; }
 
+  /** Is this person in the fight, rather than in the crowd? */
+  get isFighter() {
+    return this.cop || this.state === 'hostile' || this.state === 'aim' || this.state === 'chase';
+  }
+
   syncMesh(dt) {
     this.mesh.position.set(this.x, 0, this.z);
     this.mesh.rotation.y = this.heading;
@@ -95,15 +112,27 @@ export class Person {
     if (this.dead) {
       this.mesh.rotation.x = -Math.PI / 2;
       this.mesh.position.y = 0.25;
+      this.mesh.scale.y = 1;
       return;
     }
     this.mesh.rotation.x = 0;
     if (this.state === 'seated') {
       this.mesh.position.y = -0.55;
+      this.mesh.scale.y = 1;
       parts.legL.rotation.x = -1.4;
       parts.legR.rotation.x = -1.4;
       return;
     }
+    if (this.state === 'cower') {
+      // Ducked right down, arms over the head: shorter, still, unmistakable.
+      this.mesh.scale.y = 0.7;
+      parts.legL.rotation.x = 0.5;
+      parts.legR.rotation.x = 0.5;
+      parts.armL.rotation.x = -2.75;
+      parts.armR.rotation.x = -2.75;
+      return;
+    }
+    this.mesh.scale.y = 1;
     const swing = Math.sin(this.walkPhase) * clamp(Math.abs(this.speed) / 5, 0, 1) * 0.6;
     parts.legL.rotation.x = swing;
     parts.legR.rotation.x = -swing;
@@ -136,6 +165,27 @@ export class Person {
     return dist - step;
   }
 
+  /**
+   * React to a threat at (tx, tz): run from it, or drop and cower. The dice
+   * are the person's nerve and the kind of noise — gunfire scatters a crowd
+   * wider and ducks more heads than a passing car does. Fighters, officers
+   * and Rio himself never react: it is literally not their job to.
+   */
+  reactToThreat(tx, tz, cause = 'noise') {
+    if (this.dead || this.cop || this.hero || this.isFighter) return;
+    if (this.state === 'seated' || this.state === 'down') return;
+    const cowerChance = cause === 'gunfire' ? 0.45 : 0.2;
+    if (this.nerve < cowerChance && cause !== 'car') {
+      this.state = 'cower';
+      this.cowerTimer = this.rng.range(1.3, 2.8);
+      this.speed = 0;
+    } else {
+      this.state = 'flee';
+      this.fleeFrom = { x: tx, z: tz };
+      this.fleeTimer = this.rng.range(2.4, 4.2);
+    }
+  }
+
   hurt(amount, world) {
     if (this.dead) return;
     this.health -= amount;
@@ -143,11 +193,40 @@ export class Person {
       this.dead = true;
       this.state = 'down';
       if (world) world.onPersonDown(this);
-    } else if (!this.cop) {
+      return;
+    }
+    // Fighters hold their ground when hit — a wounded King keeps shooting,
+    // an officer keeps coming. Civilians do the sensible thing instead.
+    if (this.isFighter) return;
+    if (world && world.player) {
+      this.reactToThreat(world.player.x, world.player.z, 'pain');
+      if (this.state === 'walk') { // reactToThreat declined (seated etc.): run
+        this.state = 'flee';
+        this.fleeFrom = world.player;
+        this.fleeTimer = 4;
+      }
+    } else {
       this.state = 'flee';
       this.fleeTimer = 4;
     }
   }
+}
+
+/**
+ * Panic a crowd around a point: everyone civilian within the radius reacts
+ * to the threat there. Deaths already do this through the game; gunfire and
+ * pile-ups can call it too. Returns how many people reacted.
+ */
+export function scareCrowd(world, x, z, radius = 18, cause = 'gunfire') {
+  let reacted = 0;
+  for (const person of world.people) {
+    if (person.dead || person.cop || person.hero) continue;
+    if (Math.hypot(person.x - x, person.z - z) < radius) {
+      person.reactToThreat(x, z, cause);
+      reacted += 1;
+    }
+  }
+  return reacted;
 }
 
 /** A sidewalk point near a road line: where pedestrians amble. */
@@ -173,9 +252,47 @@ export function seedPedestrians(scene, random, count = 22) {
   return people;
 }
 
+/**
+ * Scan the world for things a pedestrian reasonably fears, a few times a
+ * second per person (staggered, so the crowd does not think in lockstep):
+ * a gunfight in earshot — combat's live tracers mean shots are landing right
+ * now, and they centre on Rio — and any car moving fast enough to kill.
+ */
+function scanForThreats(person, world) {
+  const combat = world.combat;
+  if (combat && combat.tracers && combat.tracers.length > 0 && world.player) {
+    const d = Math.hypot(person.x - world.player.x, person.z - world.player.z);
+    if (d < 30) {
+      person.reactToThreat(world.player.x, world.player.z, 'gunfire');
+      return;
+    }
+  }
+  for (const car of world.cars) {
+    if (car.wrecked || Math.abs(car.speed) < 14) continue;
+    const d = Math.hypot(person.x - car.x, person.z - car.z);
+    if (d < 9) {
+      person.reactToThreat(car.x, car.z, 'car');
+      return;
+    }
+  }
+}
+
 /** One pedestrian step: amble the sidewalks, run from danger, cower, recover. */
 export function stepPedestrian(person, dt, world) {
   if (person.dead || person.state === 'seated') { person.syncMesh(dt); return; }
+  if (person.state === 'cower') {
+    // Frozen until the timer runs out; then a short run to feel safe again,
+    // unless the street has already calmed down around them.
+    person.cowerTimer -= dt;
+    person.speed = 0;
+    if (person.cowerTimer <= 0) {
+      person.state = 'flee';
+      person.fleeFrom = person.fleeFrom || world.player;
+      person.fleeTimer = 1.1;
+    }
+    person.syncMesh(dt);
+    return;
+  }
   if (person.state === 'flee') {
     person.fleeTimer -= dt;
     const from = person.fleeFrom || world.player;
@@ -186,6 +303,13 @@ export function stepPedestrian(person, dt, world) {
     if (person.fleeTimer <= 0) person.state = 'walk';
     person.syncMesh(dt);
     return;
+  }
+  // Walking: keep half an eye on the street.
+  person.scanTimer -= dt;
+  if (person.scanTimer <= 0) {
+    person.scanTimer = 0.28;
+    scanForThreats(person, world);
+    if (person.state !== 'walk') { person.syncMesh(dt); return; }
   }
   if (!person.target || Math.hypot(person.target.x - person.x, person.target.z - person.z) < 1.2) {
     person.target = sidewalkTarget(world.rng);

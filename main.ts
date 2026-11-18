@@ -13,6 +13,19 @@
 // work, a HUD with a live minimap, a day that turns to night, synthesised
 // sound and radio, and a save that survives the visit.
 //
+// The expansion pass, in brief. Weather (game/src/weather.js): a slow front
+// system cycles clear skies into overcast, rain and full storms, with a
+// curtain of rain streaks around the camera, thunder flashes, fog that
+// closes in, and a wetness value the game reads to darken soaked roads.
+// Roadblocks (game/src/police.js): at four wanted stars the precinct seals
+// a road ahead of the player with two angled interceptors and posted
+// officers, and stands the cordon down when the heat drops. Motorbikes
+// (game/src/vehicles.js): a slimmer, quicker vehicle type that leans into
+// its turns, weaves through traffic, and can be stolen and ridden like any
+// car. And a seventh, finale chapter, "Harbor Lights" (game/src/
+// missions.js): a timed run through glowing festival rings across the bay —
+// the wash, the beach, the club, the diner — ending at the Palm Court Motel.
+//
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
