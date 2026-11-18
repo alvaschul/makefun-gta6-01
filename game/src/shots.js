@@ -8,6 +8,9 @@
 //   chase  — three stars, two interceptors, Rio's stolen coupe at speed
 //   street — on foot outside the diner, mission beacon up, a King down
 //   wash   — the respray that ends the chase: Suds & Shine, stars fading
+// Scenes are posed only through the game's own entry points — enterCar,
+// spawnShootout, the wanted ledger — so a shot can never show a state a
+// player could not actually reach.
 
 import { NAMES } from './config.js';
 

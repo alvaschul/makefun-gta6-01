@@ -2,6 +2,9 @@
 // helpers the world builders share. The same seed gives the same city, the
 // same traffic and the same screenshot scenes, which is what makes the
 // staged shots repeatable and the headless checks meaningful.
+// The helpers stay small and pure on purpose — range, pick, chance and the
+// shared clamp/lerp/angle maths — so any system can use them without
+// importing a world it does not need.
 
 export function createRandom(seed) {
   let a = seed | 0;

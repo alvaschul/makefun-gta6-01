@@ -4,6 +4,8 @@
 // progress, lifetime stats and where he was standing — never anything the
 // simulation cannot rebuild, so a stale or corrupt save degrades to a fresh
 // game instead of a broken one.
+// The storage key carries its version (v1) and loadSave re-checks the shape,
+// so a record written by any other build is refused politely, never misread.
 
 const SAVE_KEY = 'neon-harbor.save.v1';
 

@@ -4,6 +4,9 @@
 // tracer flash and a muzzle pop so a shot reads instantly. Every act of
 // violence is also a police matter: combat reports crimes to the wanted
 // system with whether anyone was in a position to witness them.
+// The numbers live here too: one pistol round costs a person 34 health and
+// a car 16, while officer return fire is a dice roll that worsens with
+// distance and improves for Rio the faster he is moving when it lands.
 
 import * as THREE from 'three';
 import { WANTED } from './config.js';

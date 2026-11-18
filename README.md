@@ -52,3 +52,24 @@ Screenshots are real frames of the game itself: `game/src/shots.js` stages
 each scene by setting the actual systems running (`?shot=chase&seed=7` and
 friends, see `shots.json`) — a three-star chase up the central avenue, the
 diner shootout, the respray that ends it, and the title vista.
+
+**The expansion.** The last build widened every system above:
+
+- **Weather fronts:** Azura Bay's sky is no longer fixed to the clock.
+  Fronts roll in off the water — cloud, rain and thunder — and a wet road
+  is a different road: grip drops, braking runs long, and a chase in the
+  rain is a negotiation, not a sprint.
+- **Roadblocks:** at four stars and above the Bay Precinct stops chasing
+  and starts waiting — cruisers parked across the avenue ahead of Rio,
+  lights running. Plough through, thread the gap, or turn off early and
+  pay for it in time.
+- **Motorbikes:** traffic now mixes in rideable motorbikes — quicker off
+  the line than any car in the bay, happy between lanes, and far less
+  forgiving when the weather turns.
+- **Panic:** pedestrians react like people. Gunfire, a wreck or a car on
+  the sidewalk scatters the crowd — bystanders flee the scene or cower
+  where they stand until it is over.
+- **"Harbor Lights":** a seventh, final mission closes the story — a
+  timed checkpoint run the length of the bayfront, worth $1,500, that
+  asks everything the other six taught: the car, the map, the weather
+  and the heat.

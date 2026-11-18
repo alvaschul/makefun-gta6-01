@@ -4,6 +4,8 @@
 // the loop, so a press between two frames is never lost or counted twice.
 // The camera orbits from mouse movement: drag anywhere, or click the canvas
 // to take pointer lock for free-look, as desktop players expect.
+// The one-shot side is a bitmask of the ACT_* flags below: several presses
+// inside one frame all survive until the loop takes the mask exactly once.
 
 export const ACT_INTERACT = 1;   // E
 export const ACT_VEHICLE = 2;    // F

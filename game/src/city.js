@@ -4,7 +4,9 @@
 // rest of the game walks and drives against, and the list of landmarks the
 // missions and the minimap point at. Rendering is three.js; the layout maths
 // is plain and shared with the traffic and pedestrian systems, which follow
-// the same road centre lines.
+// the same road centre lines. Named places are placed by block address, so
+// the sign on the street, the doorway effect and the minimap marker are
+// three views of one entry in the PLACES table, never three facts to drift.
 
 import * as THREE from 'three';
 import { CITY, NAMES, PALETTE } from './config.js';

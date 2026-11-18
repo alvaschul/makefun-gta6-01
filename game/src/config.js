@@ -2,6 +2,8 @@
 // One place for the numbers every other module reads: city geometry, physics
 // feel, wanted-level pressure and the colour language of Azura Bay. Nothing
 // here touches the DOM or three.js, so the headless checks can import it too.
+// If a system needs a threshold, it reads it from here rather than burying a
+// literal in its own logic — one edit retunes the whole bay.
 
 export const CITY = {
   // The street grid: square blocks separated by two-lane roads. Road centre
@@ -43,6 +45,10 @@ export const WANTED = {
   decayPerSecond: 2.2,  // only while no cop can see the player
   washCostPerStar: 110, // Suds & Shine respray price
 };
+
+// At this many stars the Bay Precinct stops only chasing and starts setting
+// roadblocks across Rio's route — the escalation step the police read here.
+export const WANTED_ROADBLOCK_STARS = 4;
 
 export const DAY_LENGTH_SECONDS = 260; // one full Azura Bay day
 

@@ -5,6 +5,9 @@
 // corner of the screen that draws the street grid, every car and person
 // that matters, and the gold beacon of the current objective, north-up and
 // centred on Rio, the way the genre taught a generation to read a city.
+// The HUD is plain DOM over the WebGL canvas: update() rewrites the text,
+// star row and bar widths each frame and redraws the radar, so nothing sits
+// between the simulation and the screen but a handful of element writes.
 
 import { CITY, NAMES } from './config.js';
 import { roadLines } from './city.js';

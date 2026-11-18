@@ -4,6 +4,10 @@
 // two-oscillator engine hum follows the car Rio is driving, and a slow
 // synthwave chord loop with a bass arpeggio plays underneath the city. The
 // radio in a car re-tunes that loop: three stations, three moods.
+// Everything is generated at call time: engine pitch tracks road speed, the
+// siren only wails while a unit is close, and one-shots (a shot, a crash, a
+// till chime) are built from the same two primitives, so the mix never needs
+// a single external file.
 
 const STATIONS = [
   { name: 'Kelapa FM — synthwave', root: 110, wave: 'sawtooth', tempo: 0.46 },
