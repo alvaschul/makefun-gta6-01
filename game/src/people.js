@@ -44,6 +44,9 @@ export class Person {
     this.armL.position.y = 1.44; this.armR.position.y = 1.44;
     this.legL.position.y = 0.76; this.legR.position.y = 0.76;
     this.group.add(this.armL, this.armR, this.legL, this.legR);
+    for (const part of [this.torso, this.head, this.armL, this.armR, this.legL, this.legR]) {
+      part.castShadow = true;
+    }
 
     this.group.position.set(x, 0, z);
     scene.add(this.group);

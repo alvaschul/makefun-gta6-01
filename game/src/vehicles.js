@@ -4,9 +4,77 @@
 
 import * as THREE from "three";
 import { CFG } from "./config.js";
-import { roadCenter, isOnRoad } from "./city.js";
+import { roadCenter, isOnRoad, makeGlowTexture, makeSmokeTexture } from "./city.js";
 
 const V = CFG.vehicles;
+
+// ------------------------------------------------------------------ smoke
+// A small shared pool of soft sprites for exhaust puffs and tyre smoke.
+// Purely decorative: it runs on Math.random, never the seeded world RNG,
+// so shot staging stays reproducible.
+const smokeTex = makeSmokeTexture();
+const glowTex = makeGlowTexture();
+const SMOKE_MAX = 56;
+const smokePool = [];
+
+function spawnSmoke(scene, x, y, z, { size = 0.6, life = 0.8, color = 0x9aa0a8, opacity = 0.4, rise = 0.9, driftX = 0, driftZ = 0 } = {}) {
+  let puff = smokePool.find((p) => p.life <= 0);
+  if (!puff) {
+    if (smokePool.length >= SMOKE_MAX) return;
+    const mat = new THREE.SpriteMaterial({
+      map: smokeTex, transparent: true, opacity: 0, depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.raycast = () => {};
+    scene.add(sprite);
+    puff = { sprite, life: 0, maxLife: 1, size: 1, grow: 1, rise: 1, driftX: 0, driftZ: 0, baseOpacity: 0.4 };
+    smokePool.push(puff);
+  }
+  puff.sprite.position.set(x, y, z);
+  puff.sprite.material.color.setHex(color);
+  puff.life = life;
+  puff.maxLife = life;
+  puff.size = size;
+  puff.grow = size * 1.9;
+  puff.rise = rise;
+  puff.driftX = driftX;
+  puff.driftZ = driftZ;
+  puff.baseOpacity = opacity;
+  puff.sprite.visible = true;
+}
+
+function updateSmokeFx(dt) {
+  for (const puff of smokePool) {
+    if (puff.life <= 0) continue;
+    puff.life -= dt;
+    if (puff.life <= 0) { puff.sprite.visible = false; puff.sprite.material.opacity = 0; continue; }
+    const t = 1 - puff.life / puff.maxLife;
+    const s = puff.size + puff.grow * t;
+    puff.sprite.scale.set(s, s, 1);
+    puff.sprite.position.y += puff.rise * dt;
+    puff.sprite.position.x += puff.driftX * dt;
+    puff.sprite.position.z += puff.driftZ * dt;
+    puff.sprite.material.opacity = puff.baseOpacity * Math.sin(Math.min(1, t) * Math.PI);
+  }
+}
+
+// shared lamp halo materials: every car's lights bloom the same way
+const headGlowMat = new THREE.SpriteMaterial({
+  map: glowTex, color: 0xffe9b8, transparent: true, opacity: 0.5,
+  blending: THREE.AdditiveBlending, depthWrite: false,
+});
+const tailGlowMat = new THREE.SpriteMaterial({
+  map: glowTex, color: 0xff4a3c, transparent: true, opacity: 0.45,
+  blending: THREE.AdditiveBlending, depthWrite: false,
+});
+
+function lampGlow(mat, x, y, z, scale) {
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.set(x, y, z);
+  sprite.scale.set(scale, scale, 1);
+  sprite.raycast = () => {};
+  return sprite;
+}
 
 export function createCarMesh(color, kind = "car") {
   const group = new THREE.Group();
@@ -17,6 +85,7 @@ export function createCarMesh(color, kind = "car") {
   if (kind === "bike") {
     const frame = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 2.1), paint);
     frame.position.y = 0.62;
+    frame.castShadow = true;
     group.add(frame);
     const seat = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.16, 0.9), dark);
     seat.position.set(0, 0.92, -0.25);
@@ -28,18 +97,22 @@ export function createCarMesh(color, kind = "car") {
       wheel.position.set(0, 0.36, z);
       group.add(wheel);
     }
+    group.add(lampGlow(headGlowMat, 0, 0.66, 1.2, 1.1));
     group.userData.wheels = [];
     return group;
   }
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.62, 4.3), paint);
   body.position.y = 0.62;
+  body.castShadow = true;
   group.add(body);
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.66, 0.55, 2.1), glass);
   cabin.position.set(0, 1.18, -0.25);
+  cabin.castShadow = true;
   group.add(cabin);
   const nose = new THREE.Mesh(new THREE.BoxGeometry(1.86, 0.3, 0.7), paint);
   nose.position.set(0, 0.5, 2.3);
+  nose.castShadow = true;
   group.add(nose);
 
   const wheelGeo = new THREE.CylinderGeometry(0.37, 0.37, 0.28, 10);
@@ -58,10 +131,12 @@ export function createCarMesh(color, kind = "car") {
     const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.06), lampMat);
     lamp.position.set(x, 0.66, 2.66);
     group.add(lamp);
+    group.add(lampGlow(headGlowMat, x, 0.66, 2.78, 1.35));
     const tail = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.14, 0.06),
       new THREE.MeshBasicMaterial({ color: 0xff3b30 }));
     tail.position.set(x, 0.68, -2.16);
     group.add(tail);
+    group.add(lampGlow(tailGlowMat, x, 0.68, -2.28, 1.05));
   }
   return group;
 }
@@ -69,6 +144,7 @@ export function createCarMesh(color, kind = "car") {
 export class VehicleEntity {
   constructor(scene, { kind = "car", color = 0xcccccc, x = 0, z = 0, angle = 0, mode = "parked" }) {
     this.kind = kind;
+    this.scene = scene;
     this.mesh = createCarMesh(color, kind);
     this.mesh.position.set(x, 0, z);
     this.mesh.rotation.y = angle;
@@ -82,6 +158,41 @@ export class VehicleEntity {
     this.traffic = null; // lane-following state when mode === traffic/police-ai
     this.occupied = false;
     this.id = Math.random().toString(36).slice(2, 8);
+    this._puffAcc = 0;   // exhaust/tyre smoke emitter accumulator
+    this._prevSpeed = 0; // for spotting acceleration in cruise()
+  }
+
+  /** Emit exhaust and tyre smoke for this frame's driving state. */
+  emitSmoke(dt, throttle, steer) {
+    const fwdX = Math.sin(this.angle), fwdZ = Math.cos(this.angle);
+    const rightX = Math.cos(this.angle), rightZ = -Math.sin(this.angle);
+    const rear = this.kind === "bike" ? 1.1 : 2.25;
+    const sliding = Math.abs(steer) > 0.6 && Math.abs(this.speed) > 13;
+    const hardBrake = throttle < 0 && this.speed > 13;
+    let rate = 0;
+    let kind = "exhaust";
+    if (sliding || hardBrake) { rate = 17; kind = "tyre"; }
+    else if (throttle > 0.25 && this.speed > 1) { rate = 7; kind = "exhaust"; }
+    if (rate === 0) return;
+    this._puffAcc += dt * rate;
+    while (this._puffAcc >= 1) {
+      this._puffAcc -= 1;
+      const jitter = () => (Math.random() - 0.5) * 0.5;
+      if (kind === "tyre") {
+        const side = Math.random() < 0.5 ? -0.9 : 0.9;
+        spawnSmoke(this.scene,
+          this.pos.x + rightX * side - fwdX * 1.45 + jitter(), 0.28,
+          this.pos.z + rightZ * side - fwdZ * 1.45 + jitter(),
+          { size: 0.85, life: 0.95, color: 0xe9edf1, opacity: 0.34, rise: 1.15,
+            driftX: -fwdX * 1.2, driftZ: -fwdZ * 1.2 });
+      } else {
+        spawnSmoke(this.scene,
+          this.pos.x - fwdX * rear + jitter(), 0.34,
+          this.pos.z - fwdZ * rear + jitter(),
+          { size: 0.5, life: 0.7, color: 0x8f979e, opacity: 0.32, rise: 0.85,
+            driftX: -fwdX * 1.6, driftZ: -fwdZ * 1.6 });
+      }
+    }
   }
 
   get topSpeed() {
@@ -109,6 +220,7 @@ export class VehicleEntity {
     this.pos.x += Math.sin(this.angle) * this.speed * dt;
     this.pos.z += Math.cos(this.angle) * this.speed * dt;
     this.syncMesh(dt);
+    this.emitSmoke(dt, throttle, steer);
     return Math.abs(this.speed) / this.topSpeed;
   }
 
@@ -124,6 +236,11 @@ export class VehicleEntity {
     this.pos.x += Math.sin(this.angle) * this.speed * dt;
     this.pos.z += Math.cos(this.angle) * this.speed * dt;
     this.syncMesh(dt);
+    // pursuing cop cars puff exhaust while they accelerate
+    if (this.mode === "police" && this.speed > 6 && this.speed > this._prevSpeed + 0.4) {
+      this.emitSmoke(dt, 0.6, 0);
+    }
+    this._prevSpeed = this.speed;
   }
 
   syncMesh(dt) {
@@ -226,6 +343,7 @@ export class VehicleManager {
 
   /** Traffic update: follow lanes, turn at junctions, brake for trouble. */
   updateTraffic(dt, playerPos, panicAt) {
+    updateSmokeFx(dt); // the shared smoke pool ticks with traffic
     const W = CFG.world;
     for (const car of this.traffic) {
       if (car.mode !== "traffic") continue;

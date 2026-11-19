@@ -28,6 +28,10 @@ const rng = worldRNG;
 
 const stage = document.getElementById("nh-stage");
 const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 stage.appendChild(renderer.domElement);
@@ -654,6 +658,7 @@ function updateCamera(dt) {
 
 function updateHUD() {
   hud.setCash(game.cash);
+  hud.setSpeed(Math.abs(playerSpeed()) * 3.6);
   hud.setStars(police.stars);
   hud.setClock(game.hour, weather.label);
   hud.setVitals(player.health, game.armour);
@@ -693,7 +698,7 @@ function frame() {
   game.hour = (game.hour + (CFG.day.minutesPerSecond * dt) / 60) % 24;
   const sunState = city.update(game.hour, dt);
   const weatherState = weather.update(dt, camera.position, sunState.daylight);
-  if (weatherState.flash > 0) city.skyMat.color.offsetHSL(0, 0, weatherState.flash * 0.25);
+  city.setSkyFlash(weatherState.flash);
   crowd.update(dt, game.elapsed);
   vehicles.updateTraffic(dt, playerAnchor(), game.elapsed < game.panicUntil ? game.panicPoint : null);
 

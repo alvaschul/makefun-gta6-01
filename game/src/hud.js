@@ -29,6 +29,10 @@ export class HUD {
     this.dlgText = $("nh-dlg-text");
     this.mapCanvas = $("nh-map");
     this.mapCtx = this.mapCanvas.getContext("2d");
+    this.damageEl = $("nh-damage");
+    this.speedNumEl = $("nh-speed-num");
+    this.lastStars = 0;
+    this.lastHealth = CFG.player.maxHealth;
     this.toastTimer = null;
     this.panels = {
       title: $("nh-panel-title"),
@@ -59,6 +63,13 @@ export class HUD {
       html += i < stars ? '<span class="nh-lit">&#9733;</span>' : "&#9733;";
     }
     this.starsEl.innerHTML = html;
+    if (stars > this.lastStars && stars > 0) {
+      // heat just went up: flare the row so the player feels it
+      this.starsEl.classList.remove("nh-pulse");
+      void this.starsEl.offsetWidth;
+      this.starsEl.classList.add("nh-pulse");
+    }
+    this.lastStars = stars;
   }
 
   setClock(hour, weatherName) {
@@ -71,6 +82,19 @@ export class HUD {
   setVitals(health, armour) {
     this.hpFill.style.width = `${Math.max(0, Math.min(100, health))}%`;
     this.arFill.style.width = `${Math.max(0, Math.min(100, armour))}%`;
+    if (health < this.lastHealth - 1) {
+      // a hit just landed: flash the red damage vignette
+      this.damageEl.classList.remove("nh-flash");
+      void this.damageEl.offsetWidth;
+      this.damageEl.classList.add("nh-flash");
+    }
+    this.damageEl.classList.toggle("nh-low", health > 0 && health <= 30);
+    this.lastHealth = health;
+  }
+
+  /** Speed readout beside the minimap, in km/h. */
+  setSpeed(kmh) {
+    if (this.speedNumEl) this.speedNumEl.textContent = `${Math.max(0, Math.round(kmh))}`;
   }
 
   setObjective(text) {
@@ -189,5 +213,22 @@ export class HUD {
     ctx.closePath();
     ctx.fill();
     ctx.restore();
+    // neon rim + north marker (the map is north-up, player rotates)
+    ctx.strokeStyle = "rgba(55,224,216,0.55)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2 - 3, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#ff4d8d";
+    ctx.beginPath();
+    ctx.moveTo(size / 2, 5);
+    ctx.lineTo(size / 2 + 4.5, 13);
+    ctx.lineTo(size / 2 - 4.5, 13);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#f4f1e8";
+    ctx.font = "bold 10px Trebuchet MS, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("N", size / 2, 24);
   }
 }

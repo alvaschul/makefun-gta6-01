@@ -8,7 +8,9 @@ import * as THREE from "three";
 import { CFG } from "./config.js";
 import { VehicleEntity } from "./vehicles.js";
 import { Person } from "./people.js";
-import { roadCenter } from "./city.js";
+import { roadCenter, makeGlowTexture, makeGlowSprite } from "./city.js";
+
+const glowTex = makeGlowTexture();
 
 const WP = CFG.wanted;
 
@@ -24,6 +26,10 @@ export class PoliceSystem {
     this.bust = 0;        // 0..1
     this.seenTimer = 0;   // seconds since a unit last had eyes on player
     this.blockadeForStars = 0;
+    // one shared siren light, parked on the nearest cop car each frame —
+    // a single real PointLight sells the whole lightbar show for free
+    this.sirenLight = new THREE.PointLight(0xff4040, 0, 36, 1.7);
+    scene.add(this.sirenLight);
   }
 
   get stars() {
@@ -42,6 +48,7 @@ export class PoliceSystem {
   clearHeat() {
     this.points = 0;
     this.bust = 0;
+    this.sirenLight.intensity = 0;
     for (const car of this.cars) { this.scene.remove(car.mesh); }
     for (const cop of this.officers) { this.scene.remove(cop.group); }
     for (const car of this.blockers) { this.scene.remove(car.mesh); }
@@ -67,13 +74,28 @@ export class PoliceSystem {
     );
     stripe.position.y = 0.82;
     car.mesh.add(stripe);
-    const bar = new THREE.Mesh(
-      new THREE.BoxGeometry(1.1, 0.16, 0.4),
-      new THREE.MeshBasicMaterial({ color: 0xff4040 })
+    // lightbar: dark base, a red lens and a blue lens, each with its own
+    // halo sprite; update() strobes them in antiphase
+    const barBase = new THREE.Mesh(
+      new THREE.BoxGeometry(1.16, 0.13, 0.42),
+      new THREE.MeshLambertMaterial({ color: 0x14161c })
     );
-    bar.position.set(0, 1.55, -0.25);
-    car.mesh.add(bar);
-    car.lightBar = bar;
+    barBase.position.set(0, 1.52, -0.25);
+    car.mesh.add(barBase);
+    const lensGeo = new THREE.BoxGeometry(0.52, 0.17, 0.4);
+    const lensL = new THREE.Mesh(lensGeo, new THREE.MeshBasicMaterial({ color: 0xff2d2d }));
+    lensL.position.set(-0.29, 1.56, -0.25);
+    car.mesh.add(lensL);
+    const lensR = new THREE.Mesh(lensGeo, new THREE.MeshBasicMaterial({ color: 0x3a7bff }));
+    lensR.position.set(0.29, 1.56, -0.25);
+    car.mesh.add(lensR);
+    const glowL = makeGlowSprite(glowTex, 0xff2d2d, 2.4, 0.8);
+    glowL.position.set(-0.29, 1.62, -0.25);
+    car.mesh.add(glowL);
+    const glowR = makeGlowSprite(glowTex, 0x3a7bff, 2.4, 0.8);
+    glowR.position.set(0.29, 1.62, -0.25);
+    car.mesh.add(glowR);
+    car.lightBar = { lensL, lensR, glowL, glowR };
     this.cars.push(car);
     return car;
   }
@@ -119,7 +141,16 @@ export class PoliceSystem {
 
     if (stars === 0) {
       // lingering units give up and leave once heat is gone
-      for (const car of this.cars) car.cruise(dt, 10, car.angle, 1.2);
+      this.sirenLight.intensity = 0;
+      for (const car of this.cars) {
+        car.cruise(dt, 10, car.angle, 1.2);
+        if (car.lightBar) {
+          car.lightBar.lensL.material.color.setHex(0x4a0d10);
+          car.lightBar.lensR.material.color.setHex(0x0d1c4a);
+          car.lightBar.glowL.material.opacity = 0;
+          car.lightBar.glowR.material.opacity = 0;
+        }
+      }
       this.bust = Math.max(0, this.bust - WP.bustDrainPerSecond * dt);
       return nearest;
     }
@@ -139,13 +170,20 @@ export class PoliceSystem {
     }
 
     let anySeeing = false;
+    let nearestCar = null;
+    // antiphase strobe: red lens lit on even beats, blue on odd
+    const strobe = Math.floor(performance.now() / 230) % 2 === 0;
     for (const car of this.cars) {
       if (car.mode !== "police") continue;
       const d = car.distanceTo(playerState.x, playerState.z);
-      nearest = Math.min(nearest, d);
+      if (d < nearest) { nearest = d; nearestCar = car; }
       if (d < 70) anySeeing = true;
       if (car.lightBar) {
-        car.lightBar.material.color.setHex(Math.floor(performance.now() / 280) % 2 ? 0xff4040 : 0x4080ff);
+        const bar = car.lightBar;
+        bar.lensL.material.color.setHex(strobe ? 0xff2d2d : 0x4a0d10);
+        bar.lensR.material.color.setHex(strobe ? 0x0d1c4a : 0x3a7bff);
+        bar.glowL.material.opacity = strobe ? 0.85 : 0.04;
+        bar.glowR.material.opacity = strobe ? 0.04 : 0.85;
       }
       if (d > 190) {
         // teleport-recycle far units back into the chase
@@ -161,6 +199,15 @@ export class PoliceSystem {
       const speed = d > 26 ? car.topSpeed : d > 9 ? car.topSpeed * 0.55 : 2;
       car.cruise(dt, speed, leadAngle, 2.4);
       this.city.resolveCollisions(car.pos, 1.6);
+    }
+
+    // the one real siren light rides the nearest unit, strobing with it
+    if (nearestCar) {
+      this.sirenLight.position.set(nearestCar.pos.x, 2.6, nearestCar.pos.z);
+      this.sirenLight.color.setHex(strobe ? 0xff2d2d : 0x3a7bff);
+      this.sirenLight.intensity = 65;
+    } else {
+      this.sirenLight.intensity = 0;
     }
 
     for (const officer of this.officers) {

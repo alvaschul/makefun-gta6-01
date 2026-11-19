@@ -25,7 +25,7 @@ function poseTitle(game) {
 }
 
 function poseChase(game) {
-  game.setHour(10.5);
+  game.setHour(17.25); // low sun, long shadows, lightbars lit
   game.weather.setFront("clear");
   game.startPlaying();
   const avenue = avenueZ();
@@ -56,7 +56,7 @@ function poseChase(game) {
 }
 
 function poseStreet(game) {
-  game.setHour(15.2);
+  game.setHour(17.7); // deep dusk: windows and lamps carry the street fight
   game.weather.setFront("clear");
   game.startPlaying();
   const diner = game.city.landmarks.get("diner");
@@ -77,7 +77,7 @@ function poseStreet(game) {
 }
 
 function poseWash(game) {
-  game.setHour(13.4);
+  game.setHour(17.55); // dusk: neon and windows on at the wash
   game.weather.setFront("clear");
   game.startPlaying();
   const wash = game.city.landmarks.get("wash");
