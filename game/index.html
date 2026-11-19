@@ -1,186 +1,214 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NEON HARBOR — an original open-world crime game in Azura Bay</title>
+<title>NEON HARBOR v2 — Azura Bay</title>
 <style>
-  :root {
-    --ink: #f5f1e8;
-    --muted: #b9c2cc;
-    --accent: #ffb454;
-    --coral: #ff5d8f;
-    --teal: #35c4b5;
-    --gold: #ffe14d;
-    --panel: rgba(13, 20, 28, 0.88);
-    --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  :root{
+    --nh-pink:#ff4d8d; --nh-cyan:#37e0d8; --nh-amber:#ffc857;
+    --nh-ink:#0b1020; --nh-paper:#f4f1e8; --nh-danger:#ff4757;
   }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1026; color: var(--ink); font-family: var(--font-ui); }
-  #game { position: fixed; inset: 0; }
-  #game canvas { display: block; }
-  .hidden { display: none !important; }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{width:100%; height:100%; overflow:hidden; background:var(--nh-ink);
+    font-family:"Trebuchet MS","Segoe UI",Verdana,sans-serif; color:var(--nh-paper);}
+  #nh-stage{position:fixed; inset:0;}
+  #nh-stage canvas{display:block;}
 
-  /* ---------- HUD ---------- */
-  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
-  #minimap-wrap {
-    position: absolute; left: 18px; bottom: 18px; width: 172px; height: 172px;
-    border: 3px solid rgba(245, 241, 232, 0.85); border-radius: 10px; overflow: hidden;
-    box-shadow: 0 6px 24px rgba(0,0,0,0.45);
-  }
-  #minimap { width: 172px; height: 172px; display: block; }
-  #bars { position: absolute; left: 202px; bottom: 26px; width: 190px; }
-  .bar { height: 13px; background: rgba(10, 14, 18, 0.72); border: 1px solid rgba(245,241,232,0.5); border-radius: 3px; margin-top: 5px; overflow: hidden; }
-  .bar > div { height: 100%; transition: width 0.18s ease; }
-  #health-fill { background: #7ed957; }
-  #armor-fill { background: #6db3f2; }
-  #top-right { position: absolute; right: 22px; top: 16px; text-align: right; }
-  #cash { font-size: 30px; font-weight: 800; letter-spacing: 0.5px; color: #9be15d; text-shadow: 0 2px 8px rgba(0,0,0,0.7); }
-  #stars { font-size: 24px; letter-spacing: 3px; color: #8b93a3; text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
-  #stars.hot { color: var(--gold); }
-  #clock { font-size: 15px; color: var(--muted); font-weight: 600; }
-  #weapon { position: absolute; right: 22px; bottom: 22px; font-size: 19px; font-weight: 700; text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
-  #radio { position: absolute; right: 22px; bottom: 50px; font-size: 14px; color: var(--accent); text-shadow: 0 2px 6px rgba(0,0,0,0.8); }
-  #objective {
-    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
-    max-width: 62vw; text-align: center; font-size: 17px; font-weight: 650;
-    background: var(--panel); border-left: 4px solid var(--gold);
-    padding: 9px 16px; border-radius: 6px; box-shadow: 0 4px 18px rgba(0,0,0,0.4);
-  }
-  #timer { position: absolute; left: 50%; top: 74px; transform: translateX(-50%); font-size: 26px; font-weight: 800; color: var(--ink); text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
-  #timer.urgent { color: #ff4040; }
-  #toast {
-    position: absolute; left: 50%; top: 118px; transform: translateX(-50%);
-    max-width: 70vw; text-align: center; font-size: 16px; font-weight: 600;
-    background: var(--panel); padding: 8px 18px; border-radius: 20px; color: var(--accent);
-  }
-  #dialogue {
-    position: absolute; left: 50%; bottom: 108px; transform: translateX(-50%);
-    width: min(680px, 86vw); background: var(--panel); border-radius: 8px;
-    padding: 12px 18px 14px; box-shadow: 0 8px 28px rgba(0,0,0,0.5);
-  }
-  #dialogue-name { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.4px; margin-bottom: 4px; }
-  #dialogue-text { font-size: 17px; line-height: 1.45; }
-  #dialogue-hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-  #crosshair { position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); opacity: 0.9; }
-  #crosshair i { position: absolute; background: var(--ink); }
-  #crosshair i:nth-child(1) { left: 9px; top: 0; width: 2px; height: 6px; }
-  #crosshair i:nth-child(2) { left: 9px; bottom: 0; width: 2px; height: 6px; }
-  #crosshair i:nth-child(3) { top: 9px; left: 0; height: 2px; width: 6px; }
-  #crosshair i:nth-child(4) { top: 9px; right: 0; height: 2px; width: 6px; }
-  #bust-wrap { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); width: 260px; text-align: center; font-weight: 800; letter-spacing: 2px; color: #ff9040; }
-  #bust-bar { height: 10px; background: rgba(10,14,18,0.7); border: 1px solid rgba(245,241,232,0.6); border-radius: 4px; overflow: hidden; margin-top: 6px; }
-  #bust-fill { height: 100%; background: #ff9040; width: 0; }
-  #prompt {
-    position: absolute; left: 50%; bottom: 210px; transform: translateX(-50%);
-    font-size: 16px; font-weight: 700; background: var(--panel); padding: 7px 16px; border-radius: 16px;
-  }
+  /* ---------- HUD layer ---------- */
+  #nh-hud{position:fixed; inset:0; pointer-events:none; z-index:5;}
+  #nh-hud.nh-hidden{display:none;}
 
-  /* ---------- Panels ---------- */
-  .panel {
-    position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; text-align: center;
-    background: radial-gradient(ellipse at 50% 35%, rgba(20, 32, 48, 0.42), rgba(5, 8, 16, 0.86));
-    padding: 24px;
-  }
-  .panel h1 {
-    font-size: clamp(44px, 9vw, 92px); margin: 0; letter-spacing: 2px; font-weight: 900;
-    background: linear-gradient(92deg, var(--coral), var(--accent) 55%, var(--teal));
-    -webkit-background-clip: text; background-clip: text; color: transparent;
-    text-shadow: none; filter: drop-shadow(0 4px 18px rgba(255, 93, 143, 0.35));
-  }
-  .panel h2 { font-size: clamp(30px, 6vw, 54px); margin: 0 0 8px; letter-spacing: 3px; }
-  .panel .sub { color: var(--muted); font-size: 17px; max-width: 620px; line-height: 1.55; margin: 10px 0 20px; }
-  .panel .story { color: var(--ink); font-size: 16px; max-width: 600px; line-height: 1.6; margin: 0 0 18px; }
-  .btn {
-    pointer-events: auto; cursor: pointer; border: 0; border-radius: 8px;
-    background: linear-gradient(92deg, var(--coral), var(--accent)); color: #1c1206;
-    font-size: 19px; font-weight: 850; padding: 13px 38px; margin: 5px;
-    box-shadow: 0 6px 22px rgba(255, 138, 92, 0.4);
-  }
-  .btn.ghost { background: rgba(245,241,232,0.12); color: var(--ink); box-shadow: none; border: 1px solid rgba(245,241,232,0.4); }
-  .controls { display: grid; grid-template-columns: auto auto; gap: 4px 18px; text-align: left; font-size: 14px; color: var(--muted); margin-top: 18px; }
-  .controls b { color: var(--ink); font-weight: 700; text-align: right; }
-  .big-red { color: #ff4040 !important; -webkit-text-fill-color: #ff4040; }
-  .big-blue { color: #6db3f2 !important; -webkit-text-fill-color: #6db3f2; }
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #nh-map-wrap{position:absolute; left:18px; bottom:18px; width:196px; height:196px;
+    border:3px solid rgba(55,224,216,.75); border-radius:50%; overflow:hidden;
+    background:rgba(6,14,24,.72); box-shadow:0 0 24px rgba(55,224,216,.35);}
+  #nh-map{width:100%; height:100%;}
+
+  #nh-vitals{position:absolute; left:24px; bottom:224px; width:210px;}
+  .nh-bar{height:13px; border:2px solid rgba(244,241,232,.85); border-radius:7px;
+    background:rgba(0,0,0,.55); margin-top:6px; overflow:hidden;}
+  .nh-bar > div{height:100%; width:100%; transition:width .18s ease;}
+  #nh-hp-fill{background:linear-gradient(90deg,#ff5f6d,#ffc371);}
+  #nh-ar-fill{background:linear-gradient(90deg,#37e0d8,#4d7cff);}
+  .nh-bar-label{font-size:11px; letter-spacing:.14em; text-transform:uppercase; opacity:.9;}
+
+  #nh-topright{position:absolute; right:20px; top:16px; text-align:right;}
+  #nh-cash{font-size:30px; font-weight:800; color:#7dff9a; text-shadow:0 2px 0 #063;}
+  #nh-stars{font-size:26px; letter-spacing:.18em; color:rgba(244,241,232,.25); min-height:32px;}
+  #nh-stars .nh-lit{color:var(--nh-amber); text-shadow:0 0 10px rgba(255,200,87,.9);}
+  #nh-clock{font-size:15px; letter-spacing:.12em; opacity:.92; margin-top:2px;}
+  #nh-weather-tag{font-size:12px; letter-spacing:.12em; opacity:.75; text-transform:uppercase;}
+
+  #nh-objective{position:absolute; top:16px; left:50%; transform:translateX(-50%);
+    max-width:560px; text-align:center; background:rgba(6,14,24,.66);
+    border-bottom:3px solid var(--nh-pink); padding:9px 22px 11px; border-radius:0 0 12px 12px;}
+  #nh-objective .nh-obj-kicker{font-size:11px; letter-spacing:.3em; color:var(--nh-cyan); text-transform:uppercase;}
+  #nh-objective-text{font-size:17px; font-weight:700; margin-top:2px;}
+  #nh-timer{font-size:15px; color:var(--nh-amber); font-weight:700; min-height:19px;}
+  #nh-timer.nh-urgent{color:var(--nh-danger);}
+
+  #nh-toast{position:absolute; left:50%; bottom:148px; transform:translateX(-50%);
+    font-size:19px; font-weight:700; color:var(--nh-paper); background:rgba(6,14,24,.7);
+    padding:8px 20px; border-radius:20px; opacity:0; transition:opacity .35s ease; white-space:nowrap;}
+  #nh-toast.nh-show{opacity:1;}
+
+  #nh-bottomright{position:absolute; right:20px; bottom:18px; text-align:right;}
+  #nh-radio{font-size:14px; color:var(--nh-cyan); letter-spacing:.08em; min-height:18px;}
+  #nh-weapon{font-size:20px; font-weight:800; letter-spacing:.1em; margin-top:3px;}
+
+  #nh-cross{position:absolute; left:50%; top:50%; width:22px; height:22px;
+    transform:translate(-50%,-50%); display:none;}
+  #nh-cross::before,#nh-cross::after{content:""; position:absolute; background:var(--nh-paper);
+    box-shadow:0 0 4px #000;}
+  #nh-cross::before{left:50%; top:0; width:2px; height:100%; transform:translateX(-50%);}
+  #nh-cross::after{top:50%; left:0; height:2px; width:100%; transform:translateY(-50%);}
+  #nh-cross.nh-on{display:block;}
+
+  #nh-bust-wrap{position:absolute; left:50%; top:58%; transform:translateX(-50%);
+    width:280px; text-align:center; display:none;}
+  #nh-bust-wrap.nh-on{display:block;}
+  #nh-bust-wrap .nh-bust-label{color:var(--nh-danger); font-weight:800; letter-spacing:.3em; font-size:14px;}
+  #nh-bust-track{height:12px; border:2px solid var(--nh-danger); border-radius:6px; overflow:hidden; background:rgba(0,0,0,.5);}
+  #nh-bust-fill{height:100%; width:0%; background:var(--nh-danger);}
+
+  #nh-prompt{position:absolute; left:50%; bottom:96px; transform:translateX(-50%);
+    font-size:17px; background:rgba(6,14,24,.78); border:1px solid var(--nh-cyan);
+    color:var(--nh-paper); padding:8px 18px; border-radius:10px; display:none;}
+  #nh-prompt.nh-on{display:block;}
+  #nh-prompt b{color:var(--nh-amber);}
+
+  #nh-dialogue{position:absolute; left:50%; bottom:26px; transform:translateX(-50%);
+    width:min(680px,92vw); background:rgba(6,10,20,.88); border-left:5px solid var(--nh-pink);
+    border-radius:10px; padding:14px 20px 12px; display:none;}
+  #nh-dialogue.nh-on{display:block;}
+  #nh-dlg-name{color:var(--nh-pink); font-weight:800; letter-spacing:.12em; font-size:14px; text-transform:uppercase;}
+  #nh-dlg-text{font-size:18px; line-height:1.45; margin-top:4px; min-height:52px;}
+  #nh-dlg-hint{font-size:12px; opacity:.7; margin-top:6px; letter-spacing:.1em;}
+
+  /* ---------- Full-screen panels ---------- */
+  .nh-panel{position:fixed; inset:0; z-index:20; display:none; align-items:center; justify-content:center;
+    flex-direction:column; text-align:center; padding:24px;}
+  .nh-panel.nh-open{display:flex;}
+  #nh-panel-title{background:linear-gradient(180deg,rgba(8,10,28,.25),rgba(8,10,28,.78));}
+  .nh-game-title{font-size:min(84px,13vw); font-weight:900; letter-spacing:.04em; line-height:.95;
+    color:var(--nh-paper); text-shadow:0 0 18px rgba(255,77,141,.85),0 0 46px rgba(55,224,216,.55);}
+  .nh-game-title span{color:var(--nh-pink);}
+  .nh-game-sub{margin-top:10px; font-size:18px; letter-spacing:.34em; text-transform:uppercase; color:var(--nh-cyan);}
+  .nh-menu{margin-top:34px; display:flex; flex-direction:column; gap:12px; pointer-events:auto;}
+  .nh-btn{font:inherit; font-size:19px; font-weight:800; letter-spacing:.12em; cursor:pointer;
+    color:var(--nh-ink); background:var(--nh-amber); border:none; border-radius:10px; padding:13px 44px;
+    box-shadow:0 4px 0 #9c6d12; transition:transform .08s ease, filter .15s ease;}
+  .nh-btn:hover{filter:brightness(1.1);}
+  .nh-btn:active{transform:translateY(3px); box-shadow:0 1px 0 #9c6d12;}
+  .nh-btn.nh-ghost{background:transparent; color:var(--nh-paper); border:2px solid var(--nh-cyan); box-shadow:none;}
+  .nh-btn:disabled{opacity:.4; cursor:default;}
+  .nh-controls-card{margin-top:30px; background:rgba(6,10,20,.72); border-radius:12px; padding:14px 26px;
+    font-size:14px; line-height:1.75; text-align:left;}
+  .nh-controls-card b{color:var(--nh-amber); display:inline-block; min-width:118px;}
+  #nh-panel-pause{background:rgba(5,8,18,.78);}
+  #nh-panel-wasted{background:rgba(30,2,6,.72);}
+  #nh-panel-busted{background:rgba(2,10,34,.72);}
+  #nh-panel-complete{background:rgba(4,20,16,.78);}
+  .nh-big-word{font-size:min(76px,12vw); font-weight:900; letter-spacing:.14em;}
+  #nh-panel-wasted .nh-big-word{color:var(--nh-danger); text-shadow:0 0 30px rgba(255,71,87,.7);}
+  #nh-panel-busted .nh-big-word{color:#6db3ff; text-shadow:0 0 30px rgba(77,124,255,.7);}
+  #nh-panel-complete .nh-big-word{color:#7dff9a; text-shadow:0 0 30px rgba(55,224,216,.6);}
+  .nh-panel-note{margin-top:12px; font-size:17px; opacity:.92; max-width:520px; line-height:1.5;}
+  .nh-panel .nh-menu{pointer-events:auto;}
 </style>
 <script type="importmap">
 { "imports": { "three": "./vendor/three/three.module.min.js" } }
 </script>
 </head>
 <body>
-<div id="game" aria-label="NEON HARBOR: explore Azura Bay on foot and by car, take jobs, outrun the Bay Precinct"></div>
+<div id="nh-stage"></div>
 
-<div id="hud" class="hidden">
-  <div id="minimap-wrap"><canvas id="minimap" width="172" height="172"></canvas></div>
-  <div id="bars">
-    <div class="bar"><div id="health-fill"></div></div>
-    <div class="bar"><div id="armor-fill"></div></div>
+<div id="nh-hud" class="nh-hidden">
+  <div id="nh-map-wrap"><canvas id="nh-map" width="196" height="196"></canvas></div>
+  <div id="nh-vitals">
+    <div class="nh-bar-label">Health</div>
+    <div class="nh-bar"><div id="nh-hp-fill"></div></div>
+    <div class="nh-bar-label">Armour</div>
+    <div class="nh-bar"><div id="nh-ar-fill"></div></div>
   </div>
-  <div id="top-right">
-    <div id="cash">$0</div>
-    <div id="stars">☆☆☆☆☆</div>
-    <div id="clock">08:00</div>
+  <div id="nh-topright">
+    <div id="nh-cash">$0</div>
+    <div id="nh-stars"></div>
+    <div id="nh-clock">08:00</div>
+    <div id="nh-weather-tag">Clear</div>
   </div>
-  <div id="objective" class="hidden"></div>
-  <div id="timer" class="hidden"></div>
-  <div id="toast" class="hidden"></div>
-  <div id="radio" class="hidden"></div>
-  <div id="weapon">PISTOL · ∞</div>
-  <div id="crosshair"><i></i><i></i><i></i><i></i></div>
-  <div id="bust-wrap" class="hidden">BUSTED?<div id="bust-bar"><div id="bust-fill"></div></div></div>
-  <div id="prompt" class="hidden"></div>
-  <div id="dialogue" class="hidden">
-    <div id="dialogue-name"></div>
-    <div id="dialogue-text"></div>
-    <div id="dialogue-hint">E — next</div>
+  <div id="nh-objective">
+    <div class="nh-obj-kicker">Objective</div>
+    <div id="nh-objective-text">Explore Azura Bay</div>
+    <div id="nh-timer"></div>
+  </div>
+  <div id="nh-toast"></div>
+  <div id="nh-bottomright">
+    <div id="nh-radio"></div>
+    <div id="nh-weapon">FISTS</div>
+  </div>
+  <div id="nh-cross"></div>
+  <div id="nh-bust-wrap">
+    <div class="nh-bust-label">BUSTED</div>
+    <div id="nh-bust-track"><div id="nh-bust-fill"></div></div>
+  </div>
+  <div id="nh-prompt"></div>
+  <div id="nh-dialogue">
+    <div id="nh-dlg-name">Mama Lala</div>
+    <div id="nh-dlg-text"></div>
+    <div id="nh-dlg-hint">Press E to continue</div>
   </div>
 </div>
 
-<section id="title-panel" class="panel">
-  <h1>NEON HARBOR</h1>
-  <p class="story">Azura Bay, a city that never dries off. Rio Santoso drives for Mama Lala —
-  until the Coral Kings take her ledger, her boat money and her nephew. Six jobs stand
-  between Rio and the low tide that settles every debt.</p>
-  <div>
-    <button id="new-btn" class="btn">New Game</button>
-    <button id="continue-btn" class="btn ghost hidden">Continue</button>
+<section id="nh-panel-title" class="nh-panel nh-open">
+  <div class="nh-game-title">NEON <span>HARBOR</span></div>
+  <div class="nh-game-sub">Azura Bay &middot; v2</div>
+  <div class="nh-menu">
+    <button id="nh-btn-new" class="nh-btn" type="button">NEW GAME</button>
+    <button id="nh-btn-continue" class="nh-btn nh-ghost" type="button">CONTINUE</button>
   </div>
-  <p id="continue-note" class="sub"></p>
-  <div class="controls" id="controls-list"><b>Weather</b><span>fronts roll in over Azura Bay — rain makes the roads slick</span></div>
-</section>
-
-<section id="pause-panel" class="panel hidden">
-  <h2>PAUSED</h2>
-  <p class="sub">The bay waits. Your game is saved.</p>
-  <div>
-    <button id="resume-btn" class="btn">Resume</button>
-    <button id="quit-btn" class="btn ghost">Title screen</button>
+  <div class="nh-controls-card">
+    <div><b>W A S D</b> move / drive</div>
+    <div><b>Mouse</b> look &middot; hold Shift to aim, click to shoot</div>
+    <div><b>Shift</b> sprint on foot</div>
+    <div><b>E / F</b> enter car, interact, talk</div>
+    <div><b>R</b> radio (in car) &middot; <b>M</b> mute &middot; <b>Esc</b> pause</div>
   </div>
-  <div class="controls" id="controls-list-2"></div>
 </section>
 
-<section id="wasted-panel" class="panel hidden">
-  <h2 class="big-red">WASTED</h2>
-  <p class="sub" id="wasted-note">Azura General patches Rio up — for a price.</p>
-  <button id="wasted-btn" class="btn">Wake up at the hospital</button>
+<section id="nh-panel-pause" class="nh-panel">
+  <div class="nh-big-word">PAUSED</div>
+  <p class="nh-panel-note">The harbour waits for no one, Rio.</p>
+  <div class="nh-menu">
+    <button id="nh-btn-resume" class="nh-btn" type="button">RESUME</button>
+    <button id="nh-btn-quit-title" class="nh-btn nh-ghost" type="button">QUIT TO TITLE</button>
+  </div>
 </section>
 
-<section id="busted-panel" class="panel hidden">
-  <h2 class="big-blue">BUSTED</h2>
-  <p class="sub" id="busted-note">The Bay Precinct keeps the fine and the lesson.</p>
-  <button id="busted-btn" class="btn">Walk out of the precinct</button>
+<section id="nh-panel-wasted" class="nh-panel">
+  <div class="nh-big-word">WASTED</div>
+  <p class="nh-panel-note" id="nh-wasted-note">Santa Rosa Hospital patched you up and sent the bill.</p>
+  <div class="nh-menu">
+    <button id="nh-btn-respawn-hospital" class="nh-btn" type="button">LEAVE HOSPITAL</button>
+  </div>
 </section>
 
-<section id="complete-panel" class="panel hidden">
-  <h2>LOW TIDE</h2>
-  <p class="sub">The ledger, the boat, the bay — all home. Azura Bay is Rio's now:
-  courier runs at the Palm Court Motel pay cash, and the city is yours to drive.</p>
-  <button id="complete-btn" class="btn">Keep driving</button>
+<section id="nh-panel-busted" class="nh-panel">
+  <div class="nh-big-word">BUSTED</div>
+  <p class="nh-panel-note" id="nh-busted-note">The precinct took its fine. Your wheels stay impounded.</p>
+  <div class="nh-menu">
+    <button id="nh-btn-respawn-precinct" class="nh-btn" type="button">WALK OUT</button>
+  </div>
 </section>
 
-<p id="status" role="status" aria-live="polite"></p>
+<section id="nh-panel-complete" class="nh-panel">
+  <div class="nh-big-word">HARBOR KING</div>
+  <p class="nh-panel-note" id="nh-complete-note">The Coral Kings are finished and Azura Bay is yours, Rio. Courier work is still on the board at the diner whenever you want it.</p>
+  <div class="nh-menu">
+    <button id="nh-btn-free-roam" class="nh-btn" type="button">KEEP ROAMING</button>
+  </div>
+</section>
+
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

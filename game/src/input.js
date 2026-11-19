@@ -1,94 +1,85 @@
-// Keyboard and mouse input for a third-person open world.
-// Held keys are a live state the simulation polls; one-shot presses (enter a
-// car, interact, pause, radio) are queued as flags and taken exactly once by
-// the loop, so a press between two frames is never lost or counted twice.
-// The camera orbits from mouse movement: drag anywhere, or click the canvas
-// to take pointer lock for free-look, as desktop players expect.
-// The one-shot side is a bitmask of the ACT_* flags below: several presses
-// inside one frame all survive until the loop takes the mask exactly once.
+// NEON HARBOR v2 — keyboard and mouse state.
+// One factory builds the tracker; the game loop polls it each frame and
+// calls endFrame() so "pressed this frame" edges fire exactly once.
 
-export const ACT_INTERACT = 1;   // E
-export const ACT_VEHICLE = 2;    // F
-export const ACT_PAUSE = 4;      // P / Esc
-export const ACT_RADIO = 8;      // Tab
-export const ACT_MUTE = 16;      // M
-export const ACT_CONFIRM = 32;   // Enter / Space on menus
-
-const FLAG_BY_CODE = {
-  KeyE: ACT_INTERACT,
-  KeyF: ACT_VEHICLE,
-  KeyP: ACT_PAUSE,
-  Escape: ACT_PAUSE,
-  Tab: ACT_RADIO,
-  KeyM: ACT_MUTE,
-  Enter: ACT_CONFIRM,
-  Space: ACT_CONFIRM,
-};
-
-export function createInput(canvas) {
+export function createInput(targetElement) {
   const held = new Set();
-  let actions = 0;
-  let mouseDX = 0;
-  let mouseDY = 0;
-  let firing = false;
-  let dragging = false;
-  let locked = false;
+  const pressedEdges = new Set();
+  const state = {
+    mouseDX: 0,
+    mouseDY: 0,
+    mouseDown: false,
+    rightDown: false,
+    pointerLocked: false,
+  };
 
-  window.addEventListener('keydown', (event) => {
+  window.addEventListener("keydown", (event) => {
+    if (!held.has(event.code)) pressedEdges.add(event.code);
     held.add(event.code);
-    const flag = FLAG_BY_CODE[event.code];
-    if (flag && !event.repeat) actions |= flag;
-    if (event.code === 'Tab' || event.code === 'Space') event.preventDefault();
+    if (["Space", "ArrowUp", "ArrowDown"].includes(event.code)) event.preventDefault();
   });
-  window.addEventListener('keyup', (event) => held.delete(event.code));
-  window.addEventListener('blur', () => { held.clear(); firing = false; dragging = false; });
+  window.addEventListener("keyup", (event) => {
+    held.delete(event.code);
+  });
+  window.addEventListener("blur", () => {
+    held.clear();
+    state.mouseDown = false;
+    state.rightDown = false;
+  });
 
-  canvas.addEventListener('pointerdown', (event) => {
-    if (event.button === 0) {
-      firing = true;
-      dragging = true;
-      if (!locked && event.pointerType === 'mouse') {
-        // Pointer lock is a nicety, not a requirement: if the browser refuses
-        // (an embedded frame, a screenshot run) drag-look still works.
-        try { canvas.requestPointerLock(); } catch { /* drag-look fallback */ }
-      }
-    }
+  document.addEventListener("mousemove", (event) => {
+    if (!state.pointerLocked) return;
+    state.mouseDX += event.movementX || 0;
+    state.mouseDY += event.movementY || 0;
   });
-  window.addEventListener('pointerup', (event) => {
-    if (event.button === 0) { firing = false; dragging = false; }
+  document.addEventListener("mousedown", (event) => {
+    if (event.button === 0) state.mouseDown = true;
+    if (event.button === 2) state.rightDown = true;
   });
-  document.addEventListener('pointerlockchange', () => {
-    locked = document.pointerLockElement === canvas;
+  document.addEventListener("mouseup", (event) => {
+    if (event.button === 0) state.mouseDown = false;
+    if (event.button === 2) state.rightDown = false;
   });
-  window.addEventListener('mousemove', (event) => {
-    if (locked || dragging) {
-      mouseDX += event.movementX || 0;
-      mouseDY += event.movementY || 0;
-    }
+  document.addEventListener("contextmenu", (event) => event.preventDefault());
+  document.addEventListener("pointerlockchange", () => {
+    state.pointerLocked = document.pointerLockElement === targetElement;
   });
 
   return {
-    down(code) { return held.has(code); },
-    /** Forward/strafe axes from WASD and the arrow keys, each in -1..1. */
+    state,
+    /** True while the key is physically down. */
+    down(code) {
+      return held.has(code);
+    },
+    /** True only on the frame the key went down. */
+    pressed(code) {
+      return pressedEdges.has(code);
+    },
+    /** Movement axes from WASD + arrows, each in [-1, 1]. */
     moveAxes() {
-      const f = (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
-      const s = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
-      return { f, s };
+      const x = (held.has("KeyD") || held.has("ArrowRight") ? 1 : 0)
+        - (held.has("KeyA") || held.has("ArrowLeft") ? 1 : 0);
+      const z = (held.has("KeyS") || held.has("ArrowDown") ? 1 : 0)
+        - (held.has("KeyW") || held.has("ArrowUp") ? 1 : 0);
+      return { x, z };
     },
-    sprint() { return held.has('ShiftLeft') || held.has('ShiftRight'); },
-    firing() { return firing; },
-    /** Mouse movement since the last call, in pixels; taking it clears it. */
-    takeMouse() {
-      const taken = { dx: mouseDX, dy: mouseDY };
-      mouseDX = 0;
-      mouseDY = 0;
-      return taken;
+    /** Consume accumulated mouse motion for this frame. */
+    takeMouseDelta() {
+      const delta = { x: state.mouseDX, y: state.mouseDY };
+      state.mouseDX = 0;
+      state.mouseDY = 0;
+      return delta;
     },
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
+    requestLock() {
+      if (targetElement && targetElement.requestPointerLock) {
+        targetElement.requestPointerLock();
+      }
     },
-    isLocked() { return locked; },
+    releaseLock() {
+      if (document.pointerLockElement) document.exitPointerLock();
+    },
+    endFrame() {
+      pressedEdges.clear();
+    },
   };
 }

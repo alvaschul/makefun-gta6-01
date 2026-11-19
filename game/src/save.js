@@ -1,50 +1,59 @@
-// The save game: one JSON record in localStorage, written at every moment
-// that matters (a mission finished, a respray bought, the game paused) and
-// offered back on the title screen as Continue. It holds Rio's cash, story
-// progress, lifetime stats and where he was standing — never anything the
-// simulation cannot rebuild, so a stale or corrupt save degrades to a fresh
-// game instead of a broken one.
-// The storage key carries its version (v1) and loadSave re-checks the shape,
-// so a record written by any other build is refused politely, never misread.
+// NEON HARBOR v2 — localStorage persistence.
+// One versioned key holds the whole run: cash, story progress, where Rio
+// is standing, and lifetime counters for the complete screen.
 
-const SAVE_KEY = 'neon-harbor.save.v1';
+const SAVE_KEY = "neon-harbor-v2-save-v1";
 
-export function defaultSave() {
-  return {
-    version: 1,
-    cash: 120,
-    missionIndex: 0,     // next story mission to play
-    storyDone: false,
-    position: null,      // {x, z, heading} on foot, or null for the motel door
-    stats: { earned: 0, crimes: 0, carsStolen: 0, shotsFired: 0, timesWasted: 0, timesBusted: 0 },
-  };
+export function hasSave() {
+  try {
+    return window.localStorage.getItem(SAVE_KEY) !== null;
+  } catch {
+    return false;
+  }
 }
 
 export function loadSave() {
   try {
     const raw = window.localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || parsed.version !== 1 || typeof parsed.cash !== 'number') return null;
-    const fresh = defaultSave();
-    return {
-      ...fresh,
-      ...parsed,
-      stats: { ...fresh.stats, ...(parsed.stats || {}) },
-    };
+    const data = JSON.parse(raw);
+    if (!data || data.version !== 1) return null;
+    return data;
   } catch {
-    return null; // storage off or corrupt: a new game, not a crash
+    return null;
   }
 }
 
-export function storeSave(save) {
+export function storeSave(snapshot) {
   try {
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+    const data = {
+      version: 1,
+      savedAt: Date.now(),
+      cash: Math.round(snapshot.cash ?? 0),
+      missionIndex: snapshot.missionIndex ?? 0,
+      storyDone: Boolean(snapshot.storyDone),
+      playerPos: snapshot.playerPos ?? null,
+      hour: snapshot.hour ?? 8,
+      stats: {
+        earned: Math.round(snapshot.stats?.earned ?? 0),
+        carsStolen: snapshot.stats?.carsStolen ?? 0,
+        busts: snapshot.stats?.busts ?? 0,
+        wasted: snapshot.stats?.wasted ?? 0,
+        missionsDone: snapshot.stats?.missionsDone ?? 0,
+        couriersDone: snapshot.stats?.couriersDone ?? 0,
+      },
+    };
+    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    return true;
   } catch {
-    // Private windows and full quotas lose the save silently; the run goes on.
+    return false;
   }
 }
 
-export function clearSave() {
-  try { window.localStorage.removeItem(SAVE_KEY); } catch { /* nothing to clear */ }
+export function wipeSave() {
+  try {
+    window.localStorage.removeItem(SAVE_KEY);
+  } catch {
+    // Storage unavailable (private mode etc.) — nothing to clear.
+  }
 }

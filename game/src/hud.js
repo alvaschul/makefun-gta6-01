@@ -1,205 +1,193 @@
-// The HUD and every screen that is not the 3D world: wanted stars, cash,
-// health and armour, the weapon readout, the objective line and its timer,
-// dialogue subtitles, toasts, and the title / pause / wasted / busted /
-// story-complete panels. Plus the minimap — a small canvas radar in the
-// corner of the screen that draws the street grid, every car and person
-// that matters, and the gold beacon of the current objective, north-up and
-// centred on Rio, the way the genre taught a generation to read a city.
-// The HUD is plain DOM over the WebGL canvas: update() rewrites the text,
-// star row and bar widths each frame and redraws the radar, so nothing sits
-// between the simulation and the screen but a handful of element writes.
+// NEON HARBOR v2 — HUD: DOM readouts and the live minimap.
+// This class is the only place that touches HUD element ids; the ids use
+// the nh- scheme defined in index.html.
 
-import { CITY, NAMES } from './config.js';
-import { roadLines } from './city.js';
+import { CFG } from "./config.js";
 
-const el = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
-export class Hud {
-  constructor(game) {
-    this.game = game;
-    this.root = el('hud');
-    this.cashEl = el('cash');
-    this.starsEl = el('stars');
-    this.healthFill = el('health-fill');
-    this.armorFill = el('armor-fill');
-    this.weaponEl = el('weapon');
-    this.objectiveEl = el('objective');
-    this.timerEl = el('timer');
-    this.dialogueEl = el('dialogue');
-    this.dialogueName = el('dialogue-name');
-    this.dialogueText = el('dialogue-text');
-    this.toastEl = el('toast');
-    this.radioEl = el('radio');
-    this.bustEl = el('bust-wrap');
-    this.bustFill = el('bust-fill');
-    this.minimap = el('minimap').getContext('2d');
-    this.toastTimer = 0;
-    this.dialogueQueue = [];
-    this.dialogueDone = null;
-    this.objective = '';
-    this.timer = null;
+export class HUD {
+  constructor() {
+    this.root = $("nh-hud");
+    this.cashEl = $("nh-cash");
+    this.starsEl = $("nh-stars");
+    this.clockEl = $("nh-clock");
+    this.weatherEl = $("nh-weather-tag");
+    this.hpFill = $("nh-hp-fill");
+    this.arFill = $("nh-ar-fill");
+    this.objText = $("nh-objective-text");
+    this.timerEl = $("nh-timer");
+    this.toastEl = $("nh-toast");
+    this.radioEl = $("nh-radio");
+    this.weaponEl = $("nh-weapon");
+    this.crossEl = $("nh-cross");
+    this.bustWrap = $("nh-bust-wrap");
+    this.bustFill = $("nh-bust-fill");
+    this.promptEl = $("nh-prompt");
+    this.dlgWrap = $("nh-dialogue");
+    this.dlgName = $("nh-dlg-name");
+    this.dlgText = $("nh-dlg-text");
+    this.mapCanvas = $("nh-map");
+    this.mapCtx = this.mapCanvas.getContext("2d");
+    this.toastTimer = null;
+    this.panels = {
+      title: $("nh-panel-title"),
+      pause: $("nh-panel-pause"),
+      wasted: $("nh-panel-wasted"),
+      busted: $("nh-panel-busted"),
+      complete: $("nh-panel-complete"),
+    };
   }
 
-  show() { this.root.classList.remove('hidden'); }
-  hide() { this.root.classList.add('hidden'); }
+  showGame() { this.root.classList.remove("nh-hidden"); }
+  hideGame() { this.root.classList.add("nh-hidden"); }
+
+  showPanel(name) {
+    for (const [key, el] of Object.entries(this.panels)) {
+      el.classList.toggle("nh-open", key === name);
+    }
+  }
+  hidePanels() { this.showPanel("__none__"); }
+
+  setCash(amount) {
+    this.cashEl.textContent = `$${Math.max(0, Math.round(amount)).toLocaleString("en-US")}`;
+  }
+
+  setStars(stars) {
+    let html = "";
+    for (let i = 0; i < 5; i++) {
+      html += i < stars ? '<span class="nh-lit">&#9733;</span>' : "&#9733;";
+    }
+    this.starsEl.innerHTML = html;
+  }
+
+  setClock(hour, weatherName) {
+    const h = Math.floor(hour);
+    const m = Math.floor((hour - h) * 60);
+    this.clockEl.textContent = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    if (weatherName) this.weatherEl.textContent = weatherName;
+  }
+
+  setVitals(health, armour) {
+    this.hpFill.style.width = `${Math.max(0, Math.min(100, health))}%`;
+    this.arFill.style.width = `${Math.max(0, Math.min(100, armour))}%`;
+  }
 
   setObjective(text) {
-    if (text === this.objective) return;
-    this.objective = text;
-    this.objectiveEl.textContent = text;
-    this.objectiveEl.classList.toggle('hidden', !text);
+    if (text) this.objText.textContent = text;
   }
 
   setTimer(seconds) {
-    this.timer = seconds;
-    if (seconds === null || seconds === undefined) {
-      this.timerEl.classList.add('hidden');
+    if (seconds == null) {
+      this.timerEl.textContent = "";
+      this.timerEl.classList.remove("nh-urgent");
       return;
     }
     const s = Math.max(0, Math.ceil(seconds));
-    this.timerEl.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-    this.timerEl.classList.toggle('urgent', seconds < 15);
-    this.timerEl.classList.remove('hidden');
+    this.timerEl.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    this.timerEl.classList.toggle("nh-urgent", s <= 15);
   }
 
-  toast(text, seconds = 3.6) {
-    this.toastEl.textContent = text;
-    this.toastEl.classList.remove('hidden');
-    this.toastTimer = seconds;
+  toast(message, holdMs = 2600) {
+    this.toastEl.textContent = message;
+    this.toastEl.classList.add("nh-show");
+    if (this.toastTimer) clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => this.toastEl.classList.remove("nh-show"), holdMs);
   }
 
-  showDialogue(lines, done) {
-    this.dialogueQueue = [...lines];
-    this.dialogueDone = done || null;
-    this.nextDialogue();
+  setRadio(text) { this.radioEl.textContent = text; }
+  setWeapon(text) { this.weaponEl.textContent = text; }
+  setAiming(on) { this.crossEl.classList.toggle("nh-on", Boolean(on)); }
+
+  setBust(fraction) {
+    this.bustWrap.classList.toggle("nh-on", fraction > 0.02);
+    this.bustFill.style.width = `${Math.round(fraction * 100)}%`;
   }
 
-  nextDialogue() {
-    const line = this.dialogueQueue.shift();
-    if (!line) {
-      this.dialogueEl.classList.add('hidden');
-      if (this.dialogueDone) { const cb = this.dialogueDone; this.dialogueDone = null; cb(); }
+  setPrompt(html) {
+    if (!html) {
+      this.promptEl.classList.remove("nh-on");
+      this.promptEl.innerHTML = "";
       return;
     }
-    const [name, text] = line;
-    this.dialogueName.textContent = name;
-    this.dialogueName.style.color = name === NAMES.fixer ? '#ffb454' : name === NAMES.hero ? '#35c4b5' : '#f2f2f2';
-    this.dialogueText.textContent = text;
-    this.dialogueEl.classList.remove('hidden');
+    this.promptEl.innerHTML = html;
+    this.promptEl.classList.add("nh-on");
   }
 
-  dialogueOpen() { return !this.dialogueEl.classList.contains('hidden'); }
-
-  update(dt, game) {
-    if (this.toastTimer > 0) {
-      this.toastTimer -= dt;
-      if (this.toastTimer <= 0) this.toastEl.classList.add('hidden');
-    }
-    const player = game.player;
-    this.cashEl.textContent = `$${Math.floor(game.save.cash).toLocaleString('en-US')}`;
-    const stars = game.wanted.stars;
-    this.starsEl.textContent = '★★★★★'.slice(0, stars) + '☆☆☆☆☆'.slice(0, 5 - stars);
-    this.starsEl.classList.toggle('hot', stars > 0);
-    this.healthFill.style.width = `${Math.max(0, player.health)}%`;
-    this.healthFill.style.background = player.health < 30 ? '#ff4040' : '#7ed957';
-    this.armorFill.style.width = `${Math.max(0, player.armor)}%`;
-    if (player.car) {
-      const speed = Math.round(Math.abs(player.car.speed) * 3.6);
-      this.weaponEl.textContent = `${speed} km/h · ${player.car.wrecked ? 'WRECKED' : '—'}`;
-      this.radioEl.textContent = `♪ ${game.audio.station().name}`;
-      this.radioEl.classList.remove('hidden');
-    } else {
-      this.weaponEl.textContent = 'PISTOL · ∞';
-      this.radioEl.classList.add('hidden');
-    }
-    const bust = game.wanted.bustMeter;
-    this.bustEl.classList.toggle('hidden', bust <= 0.02);
-    this.bustFill.style.width = `${Math.min(100, bust * 100)}%`;
-    this.drawMinimap(game);
+  showDialogue(speaker, text) {
+    this.dlgName.textContent = speaker;
+    this.dlgText.textContent = text;
+    this.dlgWrap.classList.add("nh-on");
   }
+  hideDialogue() { this.dlgWrap.classList.remove("nh-on"); }
+  get dialogueOpen() { return this.dlgWrap.classList.contains("nh-on"); }
 
-  drawMinimap(game) {
-    const ctx = this.minimap;
-    const size = 172;
-    const range = 95;               // metres shown across the map
-    const scale = size / (range * 2);
-    const px = game.player.x;
-    const pz = game.player.z;
-    ctx.clearRect(0, 0, size, size);
-    ctx.fillStyle = '#20303c';
+  /**
+   * Minimap: north-up, player-centred. state carries positions in world
+   * metres; the map spans viewRadius metres across.
+   */
+  drawMinimap(state) {
+    const ctx = this.mapCtx;
+    const size = this.mapCanvas.width;
+    const viewRadius = 120;
+    const scale = (size / 2) / viewRadius;
+    const toMap = (x, z) => [
+      size / 2 + (x - state.player.x) * scale,
+      size / 2 + (z - state.player.z) * scale,
+    ];
+    ctx.fillStyle = "#0a1622";
     ctx.fillRect(0, 0, size, size);
-    // Streets.
-    ctx.strokeStyle = '#4a5a68';
-    ctx.lineWidth = Math.max(2, CITY.roadHalf * 2 * scale * 0.6);
+
+    // roads: verticals and horizontals from the city grid
+    ctx.strokeStyle = "#3d4c5c";
+    ctx.lineWidth = Math.max(2, CFG.world.roadWidth * scale * 0.8);
     ctx.beginPath();
-    for (const line of roadLines()) {
-      const gx = size / 2 + (line - px) * scale;
-      const gz = size / 2 + (line - pz) * scale;
-      if (gx > -10 && gx < size + 10) { ctx.moveTo(gx, 0); ctx.lineTo(gx, size); }
-      if (gz > -10 && gz < size + 10) { ctx.moveTo(0, gz); ctx.lineTo(size, gz); }
+    for (let k = 0; k <= CFG.world.blocksPerSide; k++) {
+      const c = -CFG.world.half + CFG.world.roadWidth / 2 + k * CFG.world.pitch;
+      const [vx] = toMap(c, state.player.z);
+      ctx.moveTo(vx, 0); ctx.lineTo(vx, size);
+      const [, hz] = toMap(state.player.x, c);
+      ctx.moveTo(0, hz); ctx.lineTo(size, hz);
     }
     ctx.stroke();
-    const dot = (x, z, color, r = 3) => {
-      const gx = size / 2 + (x - px) * scale;
-      const gz = size / 2 + (z - pz) * scale;
-      if (gx < -4 || gx > size + 4 || gz < -4 || gz > size + 4) return;
+
+    const dot = (x, z, r, color) => {
+      const [mx, my] = toMap(x, z);
+      if (mx < -6 || my < -6 || mx > size + 6 || my > size + 6) return;
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(gx, gz, r, 0, Math.PI * 2);
+      ctx.arc(mx, my, r, 0, Math.PI * 2);
       ctx.fill();
     };
-    for (const mark of game.city.landmarks) dot(mark.x, mark.z, '#9fd8ef', 2.5);
-    for (const car of game.cars) {
-      if (car === game.player.car) continue;
-      dot(car.x, car.z, car.cop ? '#3f7fd1' : '#c0c6cc', 2.5);
+    for (const p of state.pedestrians || []) dot(p.x, p.z, 1.6, "#cfd8dc");
+    for (const c of state.copCars || []) {
+      // flashing police blips
+      dot(c.x, c.z, 3.4, Math.floor(performance.now() / 300) % 2 ? "#ff5252" : "#6db3ff");
     }
-    for (const cop of game.wanted.copFeet) if (!cop.dead) dot(cop.x, cop.z, '#3f7fd1', 2.5);
-    const target = game.missions.active ? game.missions.stageTarget() : game.missions.startLandmark();
-    if (target) {
-      // The objective beacon, clamped to the map edge so it always points the way.
-      const gx = Math.max(8, Math.min(size - 8, size / 2 + (target.x - px) * scale));
-      const gz = Math.max(8, Math.min(size - 8, size / 2 + (target.z - pz) * scale));
-      ctx.fillStyle = '#ffe14d';
+    for (const g of state.gang || []) dot(g.x, g.z, 3, "#ff7f45");
+    if (state.objective) {
+      const [ox, oy] = toMap(state.objective.x, state.objective.z);
+      const clampedX = Math.max(10, Math.min(size - 10, ox));
+      const clampedY = Math.max(10, Math.min(size - 10, oy));
+      ctx.fillStyle = "#ffc857";
       ctx.beginPath();
-      ctx.arc(gx, gz, 5, 0, Math.PI * 2);
+      ctx.arc(clampedX, clampedY, 5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = '#10333a';
+      ctx.strokeStyle = "#0b1020";
+      ctx.lineWidth = 2;
       ctx.stroke();
     }
-    // Rio: a white arrow that turns with him (or with his car).
-    const heading = game.player.heading;
+    // player arrow
     ctx.save();
     ctx.translate(size / 2, size / 2);
-    ctx.rotate(Math.atan2(Math.sin(heading), -Math.cos(heading)) + Math.PI);
-    ctx.fillStyle = '#ffffff';
+    ctx.rotate(state.player.angle);
+    ctx.fillStyle = "#37e0d8";
     ctx.beginPath();
-    ctx.moveTo(0, -7);
-    ctx.lineTo(5, 6);
-    ctx.lineTo(0, 3);
-    ctx.lineTo(-5, 6);
+    ctx.moveTo(0, -8);
+    ctx.lineTo(5.5, 6);
+    ctx.lineTo(-5.5, 6);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
-    // North tick.
-    ctx.fillStyle = '#f2f2f2';
-    ctx.font = 'bold 11px system-ui';
-    ctx.fillText('N', size - 14, 14);
-  }
-}
-
-/** Full-screen panels: title, pause, wasted, busted, story complete. */
-export function showPanel(id) {
-  for (const panel of document.querySelectorAll('.panel')) panel.classList.add('hidden');
-  if (id) el(id).classList.remove('hidden');
-}
-
-export function fillTitle(game) {
-  const hasSave = !!game.existingSave;
-  el('continue-btn').classList.toggle('hidden', !hasSave);
-  if (hasSave) {
-    const idx = game.existingSave.missionIndex;
-    el('continue-note').textContent = game.existingSave.storyDone
-      ? 'Story complete — free roam Azura Bay'
-      : `Continue — ${idx} of 6 chapters done · $${Math.floor(game.existingSave.cash)}`;
   }
 }

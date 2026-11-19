@@ -1,319 +1,232 @@
-// People: Rio, the pedestrians of Azura Bay, and the officers who chase him
-// share one low-poly humanoid build and one walk cycle — what differs is the
-// clothes, the orders they are following and what happens when they are hit.
-// A Person is a small state machine (walk, flee, cower, chase, aim, down)
-// the game's systems steer through intents, never by reaching into the mesh
-// directly.
-//
-// The street also has nerves now. A pedestrian carries a `nerve` trait rolled
-// at spawn: when gunfire cracks or a car screams past, the steady ones run
-// and the rest drop into a cower until the noise moves on. Fighters — Coral
-// Kings in a shootout, officers on duty — do not scatter; being shot makes a
-// King angry, not gone, which is what keeps a firefight a firefight.
+// NEON HARBOR v2 — people: low-poly figures for Rio, pedestrians and
+// gang members, with sidewalk wandering, panic, and a health model.
 
-import * as THREE from 'three';
-import { CITY, PALETTE, PLAYER } from './config.js';
-import { resolveCollisions, roadLines } from './city.js';
-import { angleDelta, clamp, rngHelpers } from './random.js';
+import * as THREE from "three";
+import { CFG } from "./config.js";
+import { blockCenter } from "./city.js";
 
-const skinTones = [0xf2c79b, 0xc68863, 0x8a5a3b, 0x6e4525, 0xffdbac];
-const shirtColors = [0xff5d8f, 0x35c4b5, 0xffb454, 0x7a6cff, 0xf2f2f2, 0x8bc34a, 0xd64545, 0x3f7fd1];
-const pantsColors = [0x2b2f36, 0x3a4a63, 0x6e4525, 0x555b63, 0x22403a];
-
-export function buildPersonMesh({ shirt, pants, skin, cop = false, hero = false }) {
-  const group = new THREE.Group();
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.21, 0.78, 0.24), new THREE.MeshLambertMaterial({ color: pants }));
-  legL.position.set(-0.13, 0.39, 0);
-  const legR = legL.clone();
-  legR.position.x = 0.13;
-  const torso = new THREE.Mesh(
-    new THREE.BoxGeometry(0.56, 0.68, 0.3),
-    new THREE.MeshLambertMaterial({ color: cop ? 0x22364a : shirt }),
-  );
-  torso.position.y = 1.12;
-  torso.castShadow = true;
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.62, 0.17), torso.material);
-  armL.position.set(-0.37, 1.14, 0);
-  const armR = armL.clone();
-  armR.position.x = 0.37;
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.21, 10, 8),
-    new THREE.MeshLambertMaterial({ color: skin }),
-  );
-  head.position.y = 1.66;
-  head.castShadow = true;
-  group.add(legL, legR, torso, armL, armR, head);
-  if (cop) {
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.23, 0.25, 0.12, 10), new THREE.MeshLambertMaterial({ color: 0x16222e }));
-    cap.position.y = 1.84;
-    const badge = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.02), new THREE.MeshBasicMaterial({ color: 0xffe14d }));
-    badge.position.set(0.14, 1.24, 0.17);
-    group.add(cap, badge);
-  }
-  if (hero) {
-    // Rio's coral jacket reads at a distance — the player must never lose him.
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.14, 0.32), new THREE.MeshBasicMaterial({ color: 0xffe14d }));
-    stripe.position.y = 1.28;
-    group.add(stripe);
-  }
-  group.userData = { legL, legR, armL, armR, torso, head };
-  return group;
-}
-
-let nextPersonId = 1;
+const SKIN_TONES = [0xf2c89b, 0xc68863, 0x8d5524, 0xffdbac];
+const SHIRTS = [0x3f7fbf, 0xd64550, 0xf2b134, 0x4caf7d, 0xe8e6df, 0x8e44ad, 0xef7f45];
+const PANTS = [0x2c3550, 0x4a3b2a, 0x22262e, 0x5a6b7a];
 
 export class Person {
-  constructor(scene, random, { x, z, cop = false, hero = false, name = '' }) {
-    const rng = rngHelpers(random);
-    this.rng = rng;            // kept: reactions roll dice long after spawn
-    this.id = nextPersonId++;
-    this.name = name;
-    this.cop = cop;
-    this.hero = hero;
-    this.mesh = buildPersonMesh({
-      shirt: rng.pick(shirtColors),
-      pants: rng.pick(pantsColors),
-      skin: rng.pick(skinTones),
-      cop,
-      hero,
-    });
-    this.x = x;
-    this.z = z;
-    this.heading = rng.range(0, Math.PI * 2);
-    this.health = cop ? 60 : 40;
-    this.state = 'walk';       // walk | flee | cower | chase | aim | hostile | down | seated
-    this.speed = 0;
-    this.walkPhase = rng.range(0, 6);
-    this.target = null;        // {x, z} the walker is heading for
-    this.fleeFrom = null;
-    this.fleeTimer = 0;
-    this.cowerTimer = 0;       // seconds left ducked down with hands up
-    this.scanTimer = rng.range(0, 0.3); // staggers the crowd's threat checks
-    this.knockTimer = 0;       // brief immunity after a car clips this person
-    this.nerve = rng.next();   // low nerve cowers, high nerve runs, both live
-    this.shootCooldown = rng.range(0.5, 1.5);
+  constructor(scene, { x = 0, z = 0, shirt, pants, skin, gang = false, officer = false } = {}) {
+    this.group = new THREE.Group();
+    const shirtColor = officer ? 0x24457e : gang ? CFG.palette.gangShirt : shirt ?? 0x3f7fbf;
+    const legColor = officer ? 0x1c2f4e : pants ?? 0x2c3550;
+    const skinColor = skin ?? 0xd9a066;
+    const mat = (c) => new THREE.MeshLambertMaterial({ color: c });
+
+    this.torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.78, 0.34), mat(shirtColor));
+    this.torso.position.y = 1.12;
+    this.group.add(this.torso);
+    this.head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.44, 0.4), mat(skinColor));
+    this.head.position.y = 1.76;
+    this.group.add(this.head);
+    if (officer) {
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 0.46), mat(0x16294f));
+      cap.position.y = 2.02;
+      this.group.add(cap);
+    }
+    if (gang) {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.1, 0.44), mat(0xff5722));
+      band.position.y = 1.94;
+      this.group.add(band);
+    }
+    const limb = (w, h, c) => new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat(c));
+    this.armL = limb(0.16, 0.68, shirtColor); this.armL.position.set(-0.4, 1.14, 0);
+    this.armR = limb(0.16, 0.68, shirtColor); this.armR.position.set(0.4, 1.14, 0);
+    this.legL = limb(0.2, 0.78, legColor); this.legL.position.set(-0.16, 0.39, 0);
+    this.legR = limb(0.2, 0.78, legColor); this.legR.position.set(0.16, 0.39, 0);
+    // pivot limbs at their tops so swing looks like walking
+    for (const part of [this.armL, this.armR]) part.geometry.translate(0, -0.3, 0);
+    for (const part of [this.legL, this.legR]) part.geometry.translate(0, -0.34, 0);
+    this.armL.position.y = 1.44; this.armR.position.y = 1.44;
+    this.legL.position.y = 0.76; this.legR.position.y = 0.76;
+    this.group.add(this.armL, this.armR, this.legL, this.legR);
+
+    this.group.position.set(x, 0, z);
+    scene.add(this.group);
+    this.pos = this.group.position;
+    this.angle = 0;
+    this.health = gang ? 70 : 50;
+    this.maxHealth = this.health;
     this.dead = false;
-    this.car = null;           // the Car this person is driving, if any
-    this.mesh.position.set(x, 0, z);
-    scene.add(this.mesh);
+    this.walkPhase = Math.random() * Math.PI * 2;
+    this.gang = gang;
+    this.officer = officer;
+    this.speedNow = 0;
   }
 
-  get pos() { return this.mesh.position; }
-
-  /** Is this person in the fight, rather than in the crowd? */
-  get isFighter() {
-    return this.cop || this.state === 'hostile' || this.state === 'aim' || this.state === 'chase';
-  }
-
-  syncMesh(dt) {
-    this.mesh.position.set(this.x, 0, this.z);
-    this.mesh.rotation.y = this.heading;
-    const parts = this.mesh.userData;
-    if (this.dead) {
-      this.mesh.rotation.x = -Math.PI / 2;
-      this.mesh.position.y = 0.25;
-      this.mesh.scale.y = 1;
-      return;
-    }
-    this.mesh.rotation.x = 0;
-    if (this.state === 'seated') {
-      this.mesh.position.y = -0.55;
-      this.mesh.scale.y = 1;
-      parts.legL.rotation.x = -1.4;
-      parts.legR.rotation.x = -1.4;
-      return;
-    }
-    if (this.state === 'cower') {
-      // Ducked right down, arms over the head: shorter, still, unmistakable.
-      this.mesh.scale.y = 0.7;
-      parts.legL.rotation.x = 0.5;
-      parts.legR.rotation.x = 0.5;
-      parts.armL.rotation.x = -2.75;
-      parts.armR.rotation.x = -2.75;
-      return;
-    }
-    this.mesh.scale.y = 1;
-    const swing = Math.sin(this.walkPhase) * clamp(Math.abs(this.speed) / 5, 0, 1) * 0.6;
-    parts.legL.rotation.x = swing;
-    parts.legR.rotation.x = -swing;
-    if (this.state === 'aim') {
-      parts.armR.rotation.x = -1.5;
-      parts.armL.rotation.x = -1.2;
-    } else {
-      parts.armL.rotation.x = -swing * 0.8;
-      parts.armR.rotation.x = swing * 0.8;
-    }
-    void dt;
-  }
-
-  /** Move toward a point at a speed, turning smoothly; returns distance left. */
-  moveToward(dt, tx, tz, speed, colliders) {
-    const dx = tx - this.x;
-    const dz = tz - this.z;
+  /** Walk toward a point; swing limbs in proportion to speed. */
+  moveToward(dt, tx, tz, speed) {
+    const dx = tx - this.pos.x;
+    const dz = tz - this.pos.z;
     const dist = Math.hypot(dx, dz);
-    if (dist < 0.05) { this.speed = 0; return 0; }
-    const want = Math.atan2(dx, dz);
-    this.heading += clamp(angleDelta(this.heading, want), -7 * dt, 7 * dt);
-    const step = Math.min(dist, speed * dt);
-    const nx = this.x + Math.sin(this.heading) * step;
-    const nz = this.z + Math.cos(this.heading) * step;
-    const resolved = resolveCollisions(colliders, nx, nz, PLAYER.radius);
-    this.x = resolved.x;
-    this.z = resolved.z;
-    this.speed = speed;
-    this.walkPhase += dt * speed * 1.9;
-    return dist - step;
+    if (dist < 0.15) { this.speedNow = 0; this.animate(dt); return true; }
+    const targetAngle = Math.atan2(dx, dz);
+    let diff = targetAngle - this.angle;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    this.angle += THREE.MathUtils.clamp(diff, -7 * dt, 7 * dt);
+    const step = Math.min(speed * dt, dist);
+    this.pos.x += Math.sin(this.angle) * step;
+    this.pos.z += Math.cos(this.angle) * step;
+    this.speedNow = speed;
+    this.animate(dt);
+    return false;
   }
 
-  /**
-   * React to a threat at (tx, tz): run from it, or drop and cower. The dice
-   * are the person's nerve and the kind of noise — gunfire scatters a crowd
-   * wider and ducks more heads than a passing car does. Fighters, officers
-   * and Rio himself never react: it is literally not their job to.
-   */
-  reactToThreat(tx, tz, cause = 'noise') {
-    if (this.dead || this.cop || this.hero || this.isFighter) return;
-    if (this.state === 'seated' || this.state === 'down') return;
-    const cowerChance = cause === 'gunfire' ? 0.45 : 0.2;
-    if (this.nerve < cowerChance && cause !== 'car') {
-      this.state = 'cower';
-      this.cowerTimer = this.rng.range(1.3, 2.8);
-      this.speed = 0;
-    } else {
-      this.state = 'flee';
-      this.fleeFrom = { x: tx, z: tz };
-      this.fleeTimer = this.rng.range(2.4, 4.2);
-    }
-  }
-
-  hurt(amount, world) {
+  animate(dt) {
+    this.group.rotation.y = this.angle;
     if (this.dead) return;
+    this.walkPhase += dt * (2 + this.speedNow * 1.7);
+    const swing = Math.sin(this.walkPhase) * Math.min(0.65, this.speedNow * 0.13);
+    this.legL.rotation.x = swing;
+    this.legR.rotation.x = -swing;
+    this.armL.rotation.x = -swing * 0.8;
+    this.armR.rotation.x = swing * 0.8;
+  }
+
+  /** Point the gun arm at a target while aiming (player / gang). */
+  aimPose() {
+    this.armR.rotation.x = -Math.PI / 2 + 0.12;
+    this.armL.rotation.x = -Math.PI / 2 + 0.3;
+  }
+
+  damage(amount) {
+    if (this.dead) return true;
     this.health -= amount;
     if (this.health <= 0) {
       this.dead = true;
-      this.state = 'down';
-      if (world) world.onPersonDown(this);
-      return;
+      this.group.rotation.x = Math.PI / 2;
+      this.group.position.y = 0.25;
+      return true;
     }
-    // Fighters hold their ground when hit — a wounded King keeps shooting,
-    // an officer keeps coming. Civilians do the sensible thing instead.
-    if (this.isFighter) return;
-    if (world && world.player) {
-      this.reactToThreat(world.player.x, world.player.z, 'pain');
-      if (this.state === 'walk') { // reactToThreat declined (seated etc.): run
-        this.state = 'flee';
-        this.fleeFrom = world.player;
-        this.fleeTimer = 4;
+    return false;
+  }
+
+  distanceTo(x, z) {
+    return Math.hypot(this.pos.x - x, this.pos.z - z);
+  }
+}
+
+export class CrowdManager {
+  constructor(scene, city, rng, count = 26) {
+    this.scene = scene;
+    this.city = city;
+    this.rng = rng;
+    this.pedestrians = [];
+    this.gangMembers = [];
+    for (let i = 0; i < count; i++) {
+      const ped = new Person(scene, {
+        x: 0, z: 0,
+        shirt: rng.pick(SHIRTS), pants: rng.pick(PANTS), skin: rng.pick(SKIN_TONES),
+      });
+      this.placeOnSidewalk(ped);
+      ped.brain = { target: null, wait: 0, panicUntil: 0, cower: false };
+      this.pedestrians.push(ped);
+    }
+  }
+
+  placeOnSidewalk(person) {
+    const W = CFG.world;
+    const bx = this.rng.int(0, W.blocksPerSide - 1);
+    const bz = this.rng.int(0, W.blocksPerSide - 1);
+    const edge = W.blockSize / 2 + 2.6;
+    person.pos.x = blockCenter(bx) + this.rng.range(-edge, edge);
+    person.pos.z = blockCenter(bz) + (this.rng.chance(0.5) ? edge : -edge);
+  }
+
+  sidewalkTarget(fromPos) {
+    const W = CFG.world;
+    const bx = this.rng.int(0, W.blocksPerSide - 1);
+    const bz = this.rng.int(0, W.blocksPerSide - 1);
+    const edge = W.blockSize / 2 + 2.6;
+    return {
+      x: blockCenter(bx) + this.rng.range(-edge, edge),
+      z: blockCenter(bz) + this.rng.range(-edge, edge),
+    };
+  }
+
+  /** Panic spreads from a point: nearby peds flee, a few cower. */
+  scare(x, z, radius, nowSeconds) {
+    for (const ped of this.pedestrians) {
+      if (ped.dead) continue;
+      if (ped.distanceTo(x, z) < radius) {
+        ped.brain.panicUntil = nowSeconds + this.rng.range(2.5, 5);
+        ped.brain.cower = this.rng.chance(0.3);
+        ped.brain.target = null;
+        ped.brain.scareX = x;
+        ped.brain.scareZ = z;
       }
-    } else {
-      this.state = 'flee';
-      this.fleeTimer = 4;
     }
   }
-}
 
-/**
- * Panic a crowd around a point: everyone civilian within the radius reacts
- * to the threat there. Deaths already do this through the game; gunfire and
- * pile-ups can call it too. Returns how many people reacted.
- */
-export function scareCrowd(world, x, z, radius = 18, cause = 'gunfire') {
-  let reacted = 0;
-  for (const person of world.people) {
-    if (person.dead || person.cop || person.hero) continue;
-    if (Math.hypot(person.x - x, person.z - z) < radius) {
-      person.reactToThreat(x, z, cause);
-      reacted += 1;
+  update(dt, nowSeconds) {
+    for (const ped of this.pedestrians) {
+      if (ped.dead) continue;
+      const brain = ped.brain;
+      if (nowSeconds < brain.panicUntil) {
+        if (brain.cower) {
+          ped.speedNow = 0;
+          ped.group.scale.y = 0.72; // crouched down
+          ped.animate(dt);
+          continue;
+        }
+        ped.group.scale.y = 1;
+        // run directly away from the last scare origin stored on the brain
+        const awayX = ped.pos.x + (ped.pos.x - (brain.scareX ?? ped.pos.x - 1)) * 2;
+        const awayZ = ped.pos.z + (ped.pos.z - (brain.scareZ ?? ped.pos.z)) * 2;
+        ped.moveToward(dt, awayX, awayZ, 7.5);
+        this.city.resolveCollisions(ped.pos, 0.5);
+        continue;
+      }
+      ped.group.scale.y = 1;
+      if (brain.wait > 0) {
+        brain.wait -= dt;
+        ped.speedNow = 0;
+        ped.animate(dt);
+        continue;
+      }
+      if (!brain.target) brain.target = this.sidewalkTarget(ped.pos);
+      const arrived = ped.moveToward(dt, brain.target.x, brain.target.z, 2.1);
+      this.city.resolveCollisions(ped.pos, 0.5);
+      if (arrived) {
+        brain.target = null;
+        brain.wait = this.rng.range(0.5, 4);
+      }
+    }
+    // gang members are updated by missions/main combat code, but keep
+    // their idle animation ticking here when nobody is steering them
+    for (const member of this.gangMembers) {
+      if (!member.dead && !member.steered) member.animate(dt);
+      member.steered = false;
     }
   }
-  return reacted;
-}
 
-/** A sidewalk point near a road line: where pedestrians amble. */
-function sidewalkTarget(rng) {
-  const lines = roadLines();
-  const vertical = rng.chance(0.5);
-  const line = rng.pick(lines);
-  const side = rng.chance(0.5) ? -1 : 1;
-  const off = side * (CITY.roadHalf + 1.7);
-  const along = rng.range(-CITY.extent + 8, CITY.extent - 8);
-  return vertical ? { x: line + off, z: along } : { x: along, z: line + off };
-}
+  spawnGang(x, z, count) {
+    const spawned = [];
+    for (let i = 0; i < count; i++) {
+      const member = new Person(this.scene, {
+        x: x + this.rng.range(-6, 6),
+        z: z + this.rng.range(-6, 6),
+        gang: true,
+        skin: this.rng.pick(SKIN_TONES),
+      });
+      member.shootCooldown = this.rng.range(0.4, 1.4);
+      this.gangMembers.push(member);
+      spawned.push(member);
+    }
+    return spawned;
+  }
 
-export function seedPedestrians(scene, random, count = 22) {
-  const people = [];
-  const rng = rngHelpers(random);
-  for (let i = 0; i < count; i += 1) {
-    const at = sidewalkTarget(rng);
-    const person = new Person(scene, random, { x: at.x, z: at.z });
-    person.target = sidewalkTarget(rng);
-    people.push(person);
+  clearGang() {
+    for (const member of this.gangMembers) this.scene.remove(member.group);
+    this.gangMembers = [];
   }
-  return people;
-}
 
-/**
- * Scan the world for things a pedestrian reasonably fears, a few times a
- * second per person (staggered, so the crowd does not think in lockstep):
- * a gunfight in earshot — combat's live tracers mean shots are landing right
- * now, and they centre on Rio — and any car moving fast enough to kill.
- */
-function scanForThreats(person, world) {
-  const combat = world.combat;
-  if (combat && combat.tracers && combat.tracers.length > 0 && world.player) {
-    const d = Math.hypot(person.x - world.player.x, person.z - world.player.z);
-    if (d < 30) {
-      person.reactToThreat(world.player.x, world.player.z, 'gunfire');
-      return;
-    }
+  livingGang() {
+    return this.gangMembers.filter((m) => !m.dead);
   }
-  for (const car of world.cars) {
-    if (car.wrecked || Math.abs(car.speed) < 14) continue;
-    const d = Math.hypot(person.x - car.x, person.z - car.z);
-    if (d < 9) {
-      person.reactToThreat(car.x, car.z, 'car');
-      return;
-    }
-  }
-}
-
-/** One pedestrian step: amble the sidewalks, run from danger, cower, recover. */
-export function stepPedestrian(person, dt, world) {
-  if (person.dead || person.state === 'seated') { person.syncMesh(dt); return; }
-  if (person.state === 'cower') {
-    // Frozen until the timer runs out; then a short run to feel safe again,
-    // unless the street has already calmed down around them.
-    person.cowerTimer -= dt;
-    person.speed = 0;
-    if (person.cowerTimer <= 0) {
-      person.state = 'flee';
-      person.fleeFrom = person.fleeFrom || world.player;
-      person.fleeTimer = 1.1;
-    }
-    person.syncMesh(dt);
-    return;
-  }
-  if (person.state === 'flee') {
-    person.fleeTimer -= dt;
-    const from = person.fleeFrom || world.player;
-    if (from) {
-      const away = Math.atan2(person.x - from.x, person.z - from.z);
-      person.moveToward(dt, person.x + Math.sin(away) * 12, person.z + Math.cos(away) * 12, 6.4, world.colliders);
-    }
-    if (person.fleeTimer <= 0) person.state = 'walk';
-    person.syncMesh(dt);
-    return;
-  }
-  // Walking: keep half an eye on the street.
-  person.scanTimer -= dt;
-  if (person.scanTimer <= 0) {
-    person.scanTimer = 0.28;
-    scanForThreats(person, world);
-    if (person.state !== 'walk') { person.syncMesh(dt); return; }
-  }
-  if (!person.target || Math.hypot(person.target.x - person.x, person.target.z - person.z) < 1.2) {
-    person.target = sidewalkTarget(world.rng);
-  }
-  person.moveToward(dt, person.target.x, person.target.z, 1.7, world.colliders);
-  person.syncMesh(dt);
 }

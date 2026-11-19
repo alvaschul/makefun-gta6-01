@@ -1,100 +1,122 @@
-// NEON HARBOR — shared tuning and world constants.
-// One place for the numbers every other module reads: city geometry, physics
-// feel, wanted-level pressure and the colour language of Azura Bay. Nothing
-// here touches the DOM or three.js, so the headless checks can import it too.
-// If a system needs a threshold, it reads it from here rather than burying a
-// literal in its own logic — one edit retunes the whole bay.
+// NEON HARBOR v2 — central tuning and naming table.
+// Every other module reads its numbers from here so the whole game can be
+// rebalanced from one file. Nothing in this file touches the DOM or three.js.
 
-export const CITY = {
-  // The street grid: square blocks separated by two-lane roads. Road centre
-  // lines sit at multiples of PITCH; buildings live inside the blocks.
-  pitch: 74,
-  roadHalf: 8,          // half the road width in metres
-  sidewalk: 3.2,        // sidewalk band between road edge and block face
-  blocks: 3,            // blocks run -BLOCKS..+BLOCKS on both axes
-  get extent() { return this.blocks * this.pitch + this.pitch / 2; },
-};
-
-export const PLAYER = {
-  walkSpeed: 5.2,
-  sprintSpeed: 8.6,
-  radius: 0.55,
-  maxHealth: 100,
-  maxArmor: 100,
-  startCash: 120,
-};
-
-export const CAR = {
-  accel: 14,
-  brake: 26,
-  reverseMax: 9,
-  drag: 0.55,
-  gripTurn: 2.15,       // steering responsiveness at speed
-  radius: 1.35,
-};
-
-export const WANTED = {
-  // Crime points per act; every 100 points is a star, capped at five.
-  theft: 55,
-  assault: 45,
-  shooting: 30,
-  hitAndRun: 85,
-  copKill: 120,
-  propertyDamage: 18,
-  missionHeat: 100,
-  decayPerSecond: 2.2,  // only while no cop can see the player
-  washCostPerStar: 110, // Suds & Shine respray price
-};
-
-// At this many stars the Bay Precinct stops only chasing and starts setting
-// roadblocks across Rio's route — the escalation step the police read here.
-export const WANTED_ROADBLOCK_STARS = 4;
-
-export const DAY_LENGTH_SECONDS = 260; // one full Azura Bay day
-
-export const PALETTE = {
-  sky: { dawn: 0xffb37a, day: 0x8fd4ff, dusk: 0xff8a5c, night: 0x0b1026 },
-  sun: 0xffe3b3,
-  road: 0x2b2f36,
-  roadLine: 0xf7d774,
-  sidewalk: 0x9aa0a8,
-  grass: 0x3f9e63,
-  sand: 0xe8d29a,
-  water: 0x1d6f9f,
-  buildingBase: [0xf2e3c9, 0xdfe8ee, 0xf6cfc0, 0xcfe3d8, 0xe8dff2, 0xf9ecc8],
-  neon: [0xff5d8f, 0x35c4b5, 0xffb454, 0x7a6cff, 0xffe14d],
-  carPaint: [0xd64545, 0x3f7fd1, 0xf2f2f2, 0x22262c, 0x35c4b5, 0xffb454,
-             0x7a6cff, 0x8bc34a, 0xff5d8f, 0xc0c6cc, 0x8a5a2b, 0x2e8b6e],
-  copPaint: 0x1c2733,
-  copStripe: 0xf5f7fa,
+export const CFG = {
+  world: {
+    blocksPerSide: 5,        // city is 5 x 5 blocks
+    blockSize: 58,           // buildable square inside one block (metres)
+    roadWidth: 22,           // asphalt between blocks
+    get pitch() { return this.blockSize + this.roadWidth; },
+    get span() { return this.blocksPerSide * this.blockSize + (this.blocksPerSide + 1) * this.roadWidth; },
+    get half() { return this.span / 2; },
+    beachWidth: 46,          // sand strip east of the last road
+    waterLevel: -1.4,
+    groundLevel: 0,
+  },
+  day: {
+    startHour: 8,            // new games begin at 08:00
+    minutesPerSecond: 1.6,   // game minutes per real second
+    dawnHour: 5.5,
+    duskHour: 18.5,
+  },
+  player: {
+    walkSpeed: 6.2,
+    sprintSpeed: 10.5,
+    radius: 0.55,
+    maxHealth: 100,
+    maxArmour: 100,
+    startCash: 120,
+    gravity: 22,
+  },
+  vehicles: {
+    carAccel: 16,
+    carBrake: 30,
+    carReverse: 7,
+    carTopSpeed: 34,
+    bikeTopSpeed: 42,
+    bikeAccel: 22,
+    turnRate: 1.55,          // radians per second at full lock
+    gripDry: 7.5,
+    gripWet: 3.4,
+    trafficTopSpeed: 13,
+    copTopSpeed: 30,
+    trafficCount: 14,
+    parkedCount: 16,
+  },
+  weapons: {
+    pistol: { name: "PISTOL", damage: 34, range: 85, cooldown: 0.26, spread: 0.012 },
+    fists: { name: "FISTS", damage: 0, range: 0, cooldown: 0.5, spread: 0 },
+  },
+  wanted: {
+    // points needed to *reach* each star count (index = stars)
+    thresholds: [0, 30, 80, 160, 280, 430],
+    decayPerSecond: 2.2,     // applied only while unseen
+    unseenAfterSeconds: 6,
+    crimePoints: {
+      theft: 26,
+      shotFired: 9,
+      hitPerson: 55,
+      killPerson: 90,
+      hitCar: 14,
+      hitCopCar: 40,
+      missionHeat: 30,
+    },
+    copCarsPerStar: [0, 1, 2, 3, 4, 6],
+    footOfficersAtStars: 3,  // foot officers join from this star count
+    roadblockAtStars: 4,
+    bustFillPerSecond: 0.55,
+    bustDrainPerSecond: 0.8,
+    bustRange: 4.2,
+  },
+  prices: {
+    respray: 250,
+    hospitalBill: 150,
+    bustFineBase: 120,       // plus per-star amount below
+    bustFinePerStar: 90,
+    armourPickup: 0,         // armour is a mission reward, not sold
+  },
+  economy: {
+    courierBase: 140,
+    courierPerMetre: 0.55,
+  },
+  palette: {
+    skyDay: 0x87c9e8,
+    skyNight: 0x0a1030,
+    skyDusk: 0xff9a62,
+    fogDay: 0xa8c8dc,
+    water: 0x14607a,
+    sand: 0xe3cf9e,
+    asphalt: 0x2b2f36,
+    sidewalk: 0x8f9296,
+    buildingTones: [0xc9b8a3, 0x9fb4c7, 0xd8cfae, 0xb7a6c9, 0xa3c9b8, 0xd9a08a, 0x8fa3b8, 0xe0d6c2],
+    carPaints: [0xd64550, 0x3f7fbf, 0xf2b134, 0x4caf7d, 0xe8e6df, 0x22262e, 0x8e44ad, 0xef7f45, 0x37b8a5, 0xc0c6ce],
+    neonSigns: [0xff4d8d, 0x37e0d8, 0xffc857, 0x7dff9a, 0x6db3ff],
+    copPaint: 0xf2f2f2,
+    copTrim: 0x1c2f6e,
+    gangShirt: 0xff7f45,
+  },
 };
 
 export const NAMES = {
-  city: 'Azura Bay',
-  hero: 'Rio',
-  heroFull: 'Rio Santoso',
-  fixer: 'Mama Lala',
-  friend: 'Dedi',
-  copChief: 'Inspector Ratna',
-  gang: 'the Coral Kings',
-  washShop: 'Suds & Shine',
-  gunStore: 'Bima Arms',
-  hospital: 'Azura General',
-  precinct: 'Bay Precinct',
-  safehouse: 'Palm Court Motel',
-  diner: 'Warung Senja',
-  club: 'Club Kelapa',
-  garage: 'Bengkel Jaya',
+  city: "Azura Bay",
+  hero: "Rio Santoso",
+  fixer: "Mama Lala",
+  rivalLeader: 'Bima "Reef" Prasetyo',
+  rivalGang: "Coral Kings",
+  landmarks: {
+    motel: "Pelangi Motel",
+    diner: "Mama Lala's Diner",
+    club: "Club Sirena",
+    garage: "Haris Auto Repair",
+    arms: "Toko Senjata Budi",
+    wash: "Splash & Go Car Wash",
+    hospital: "Santa Rosa Hospital",
+    precinct: "Azura Bay Precinct",
+  },
+  radioStations: [
+    { name: "Harbour FM", style: "pop" },
+    { name: "Sirena Nights", style: "chill" },
+    { name: "Bay Talk AM", style: "talk" },
+  ],
 };
-
-export const CONTROLS_HELP = [
-  ['W A S D', 'move / drive'],
-  ['Mouse', 'orbit camera — click the game to lock the pointer'],
-  ['Shift', 'sprint on foot / handbrake in a car'],
-  ['F', 'enter / exit a car'],
-  ['Left click', 'shoot (on foot)'],
-  ['E', 'talk / buy / use'],
-  ['Tab', 'next radio station (in a car)'],
-  ['P or Esc', 'pause'],
-  ['M', 'mute'],
-];
