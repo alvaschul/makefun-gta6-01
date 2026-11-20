@@ -1,59 +1,40 @@
-// NEON HARBOR v2 — localStorage persistence.
-// One versioned key holds the whole run: cash, story progress, where Rio
-// is standing, and lifetime counters for the complete screen.
+// save.js — localStorage persistence for NEON HARBOR.
+// Stores cash, completed missions, position and vehicle paint so Continue
+// can pick the story back up. All failures are swallowed: a corrupt or
+// missing save simply means "no save".
 
-const SAVE_KEY = "neon-harbor-v2-save-v1";
+const KEY = "neon-harbor-save-v3";
 
-export function hasSave() {
+export function saveGame(obj) {
   try {
-    return window.localStorage.getItem(SAVE_KEY) !== null;
-  } catch {
+    const payload = { version: 3, savedAt: Date.now(), data: obj };
+    localStorage.setItem(KEY, JSON.stringify(payload));
+    return true;
+  } catch (err) {
     return false;
   }
 }
 
-export function loadSave() {
+export function loadGame() {
   try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (!data || data.version !== 1) return null;
-    return data;
-  } catch {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.data) return null;
+    return parsed.data;
+  } catch (err) {
     return null;
   }
 }
 
-export function storeSave(snapshot) {
+export function clearSave() {
   try {
-    const data = {
-      version: 1,
-      savedAt: Date.now(),
-      cash: Math.round(snapshot.cash ?? 0),
-      missionIndex: snapshot.missionIndex ?? 0,
-      storyDone: Boolean(snapshot.storyDone),
-      playerPos: snapshot.playerPos ?? null,
-      hour: snapshot.hour ?? 8,
-      stats: {
-        earned: Math.round(snapshot.stats?.earned ?? 0),
-        carsStolen: snapshot.stats?.carsStolen ?? 0,
-        busts: snapshot.stats?.busts ?? 0,
-        wasted: snapshot.stats?.wasted ?? 0,
-        missionsDone: snapshot.stats?.missionsDone ?? 0,
-        couriersDone: snapshot.stats?.couriersDone ?? 0,
-      },
-    };
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    return true;
-  } catch {
-    return false;
+    localStorage.removeItem(KEY);
+  } catch (err) {
+    // Storage unavailable (private mode etc.) — nothing to clear.
   }
 }
 
-export function wipeSave() {
-  try {
-    window.localStorage.removeItem(SAVE_KEY);
-  } catch {
-    // Storage unavailable (private mode etc.) — nothing to clear.
-  }
+export function hasSave() {
+  return loadGame() !== null;
 }

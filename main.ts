@@ -1,114 +1,86 @@
-/**
- * NEON HARBOR v2 — hand-in program (make.fun entry gta6-01, resubmission build)
- * ============================================================================
- *
- * NEON HARBOR v2 is an original open-world crime game that runs in the
- * browser. It is set in Azura Bay, a fictional neon-lit harbour city built
- * for this entry. The player is Rio Santoso, a small-time driver who takes
- * jobs from fixer Mama Lala while the Coral Kings, a rival crew, try to push
- * him out of the harbour wards. Every name, character, place, line of
- * dialogue and asset in the game was written for this project; nothing is
- * taken from any commercial game.
- *
- * This resubmission exists because the first build was rejected on
- * authorship grounds: too little of it had been written inside a recorded
- * session. This version was therefore rebuilt from a blank repository in a
- * single recorded session. Every source file in game/src, the page shell,
- * the server, the shot list and this program were typed during that
- * session, in order, so the recording is the authorship record.
- *
- * What this program does
- * ----------------------
- * 1. Resolves the folder it lives in (the repository root).
- * 2. Reads the destination from the MAKEFUN_OUTPUT_DIR environment
- *    variable, falling back to /output when the variable is unset.
- * 3. Creates the destination folder when it does not exist yet.
- * 4. Copies the playable game (the game/ folder) and the staged
- *    screenshots (the screenshots/ folder, when present) into the
- *    destination, preserving their relative layout.
- * 5. Asks the kit helper buildDossier() to describe the copied payload
- *    under the size limits declared by the competition, and writes the
- *    returned string to dossier.json in the destination folder.
- *
- * The program uses only the Node.js standard library (Node 22) plus the
- * single kit helper in vendor/makefun-game.ts. It never touches the
- * network, never shells out, and is safe to run repeatedly: re-running it
- * simply refreshes the destination copy.
- *
- * File inventory for this build is finalised in a short addendum at the
- * bottom of the header once the game sources are complete.
- *
- * Addendum — final inventory of the resubmission build (all authored in
- * the recorded rebuild session, in this order):
- *   main.ts (this file), serve.ts, README.md, shots.json,
- *   game/index.html, and game/src/{config, random, input, save, audio,
- *   city, vehicles, people, police, missions, hud, weather, shots,
- *   main}.js — fourteen game modules, roughly three and a half thousand
- *   lines in total across the hand-written files. The vendored three.js
- *   build under game/vendor/three and the kit helper in vendor/ are
- *   third-party/kit files and are not part of the authored count.
- */
+// main.ts — NEON HARBOR hand-in program for make.fun (gta6-01).
+//
+// What this does, in plain terms: it packages the finished game for the
+// judges. It finds its own folder, works out where the bundle should go
+// (the MAKEFUN_OUTPUT_DIR environment variable, or /output by default),
+// copies the playable game/ folder — and the screenshots/ folder when it
+// exists — into that destination, then asks the make.fun kit's dossier
+// builder to describe everything that was staged. The resulting dossier
+// text is written to dossier.json in the destination so the entry can be
+// verified exactly as submitted.
+//
+// Only Node's standard library is used here; the dossier logic itself
+// lives in vendor/makefun-game.ts, supplied by the competition kit.
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { cp, mkdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDossier } from "./vendor/makefun-game.ts";
 
-/** Absolute path of the folder that contains this program. */
-const rootDir = dirname(fileURLToPath(import.meta.url));
+const TAG = "[neon-harbor]";
 
-/** Destination folder for the hand-in payload. */
-const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
-
-/**
- * Copy one payload folder from the repository into the output folder.
- * A missing source folder is tolerated for screenshots only, because
- * screenshots are produced by a later staging step than the code build;
- * a missing game folder is a real error and is allowed to throw.
- */
-function copyPayloadFolder(name: string, required: boolean): void {
-  const source = join(rootDir, name);
-  if (!existsSync(source)) {
-    if (required) {
-      throw new Error(`Required payload folder is missing: ${source}`);
-    }
-    console.log(`[neon-harbor] optional folder "${name}" not present, skipping`);
-    return;
-  }
-  const target = join(outputDir, name);
-  cpSync(source, target, { recursive: true });
-  console.log(`[neon-harbor] copied ${name}/ -> ${target}`);
+function log(message: string): void {
+  console.log(`${TAG} ${message}`);
 }
 
-function main(): void {
-  mkdirSync(outputDir, { recursive: true });
-  copyPayloadFolder("game", true);
-  copyPayloadFolder("screenshots", false);
+async function copyFolder(source: string, destination: string, label: string) {
+  log(`copying ${label} -> ${destination}`);
+  await cp(source, destination, { recursive: true });
+}
 
-  let dossierText: string;
+async function main(): Promise<void> {
+  const here = resolve(fileURLToPath(new URL(".", import.meta.url)));
+  log(`source folder: ${here}`);
+
+  const rawOutput = process.env.MAKEFUN_OUTPUT_DIR;
+  const outputDir = rawOutput && rawOutput.trim() !== "" ? rawOutput : "/output";
+  log(`destination: ${outputDir}`);
+  await mkdir(outputDir, { recursive: true });
+
+  // The game itself is mandatory: without it there is no entry.
+  const gameSource = join(here, "game");
+  if (!existsSync(gameSource)) {
+    throw new Error(`${TAG} required folder is missing: ${gameSource}`);
+  }
+  await copyFolder(gameSource, join(outputDir, "game"), "game/");
+
+  // Screenshots are expected by the dossier builder, but a missing folder
+  // is reported and skipped here; buildDossier will complain properly if
+  // it cannot find any images in the destination.
+  const shotsSource = join(here, "screenshots");
+  if (existsSync(shotsSource)) {
+    await copyFolder(shotsSource, join(outputDir, "screenshots"), "screenshots/");
+  } else {
+    log("screenshots/ not found next to main.ts — skipping the copy step");
+  }
+
+  log("building dossier with the make.fun kit limits");
+  let dossier: string;
   try {
-    dossierText = buildDossier(outputDir, {
+    dossier = await buildDossier(outputDir, {
       text_max_bytes: 163840,
       screenshots: { max: 4, max_bytes: 262144 },
       game_max_files: 993,
       game_max_bytes: 50331648,
       game_path_max_bytes: 1000,
     });
-  } catch (error) {
-    // The kit helper refuses to describe a payload whose screenshots have
-    // not been staged yet (they are captured after the code build, by the
-    // game's own shot mode). Fail with guidance instead of a raw stack.
+  } catch (err) {
     console.error(
-      "[neon-harbor] could not build the dossier. If screenshots/ has not " +
-      "been staged yet, run the shot-mode captures listed in shots.json " +
-      "first, then re-run this program."
+      `${TAG} buildDossier failed. Before retrying: make sure the four ` +
+        `screenshots are staged in screenshots/ (see shots.json for the ` +
+        `expected file names) and that game/ is complete, then run again.`
     );
-    throw error;
+    throw err;
   }
 
   const dossierPath = join(outputDir, "dossier.json");
-  writeFileSync(dossierPath, dossierText, "utf8");
-  console.log(`[neon-harbor] dossier written to ${dossierPath}`);
+  await writeFile(dossierPath, dossier, "utf8");
+  log(`dossier written: ${dossierPath} (${Buffer.byteLength(dossier, "utf8")} bytes)`);
+  log("done");
 }
 
-main();
+main().catch((err) => {
+  console.error(`${TAG} fatal:`, err);
+  process.exit(1);
+});

@@ -1,235 +1,215 @@
-// NEON HARBOR v2 — people: low-poly figures for Rio, pedestrians and
-// gang members, with sidewalk wandering, panic, and a health model.
+// people.js — the pedestrians of Azura Bay and mission gang members.
+// Figures are simple low-poly people: legs, torso, head, in bright tropical
+// shirts. They wander sidewalks, chat in pairs, and react to violence.
 
 import * as THREE from "three";
-import { CFG } from "./config.js";
-import { blockCenter } from "./city.js";
+import { CONFIG } from "./config.js";
+import { pick, range } from "./random.js";
+import { resolveCollisions } from "./city.js";
 
-const SKIN_TONES = [0xf2c89b, 0xc68863, 0x8d5524, 0xffdbac];
-const SHIRTS = [0x3f7fbf, 0xd64550, 0xf2b134, 0x4caf7d, 0xe8e6df, 0x8e44ad, 0xef7f45];
-const PANTS = [0x2c3550, 0x4a3b2a, 0x22262e, 0x5a6b7a];
+const SHIRTS = [0xff5a7a, 0x2ee6e6, 0xf2b134, 0x7ad95a, 0xe8e4da, 0x9a5cff, 0xff8c5a];
+const SKIN = [0x8a5a3c, 0x6a4230, 0xa8744c, 0x54331f, 0xc49a68];
+const people = [];
 
-export class Person {
-  constructor(scene, { x = 0, z = 0, shirt, pants, skin, gang = false, officer = false } = {}) {
-    this.group = new THREE.Group();
-    const shirtColor = officer ? 0x24457e : gang ? CFG.palette.gangShirt : shirt ?? 0x3f7fbf;
-    const legColor = officer ? 0x1c2f4e : pants ?? 0x2c3550;
-    const skinColor = skin ?? 0xd9a066;
-    const mat = (c) => new THREE.MeshLambertMaterial({ color: c });
+export function buildFigure(shirtColor, opts = {}) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.9 });
+  const skinMat = new THREE.MeshStandardMaterial({ color: pick(SKIN), roughness: 0.8 });
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x2c3040, roughness: 1 });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.72, 0.3), mat);
+  torso.position.y = 1.12;
+  torso.castShadow = true;
+  group.add(torso);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.34, 0.3), skinMat);
+  head.position.y = 1.72;
+  head.castShadow = true;
+  group.add(head);
+  const legs = [];
+  for (const sx of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.78, 0.2), legMat);
+    leg.position.set(sx * 0.14, 0.39, 0);
+    group.add(leg);
+    legs.push(leg);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.62, 0.15), mat);
+    arm.position.set(sx * 0.34, 1.14, 0);
+    group.add(arm);
+  }
+  group.userData.legs = legs;
+  if (opts.gang) {
+    const band = new THREE.Mesh(
+      new THREE.BoxGeometry(0.34, 0.1, 0.34),
+      new THREE.MeshStandardMaterial({ color: opts.gang, emissive: opts.gang, emissiveIntensity: 0.5 })
+    );
+    band.position.y = 1.86;
+    group.add(band);
+  }
+  return group;
+}
 
-    this.torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.78, 0.34), mat(shirtColor));
-    this.torso.position.y = 1.12;
-    this.group.add(this.torso);
-    this.head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.44, 0.4), mat(skinColor));
-    this.head.position.y = 1.76;
-    this.group.add(this.head);
-    if (officer) {
-      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 0.46), mat(0x16294f));
-      cap.position.y = 2.02;
-      this.group.add(cap);
+function sidewalkPoint(city) {
+  const lines = city.roads.vertical;
+  const line = pick(lines);
+  const along = range(-CONFIG.worldSize / 2 + 16, CONFIG.worldSize / 2 - 16);
+  const side = Math.random() < 0.5 ? -1 : 1;
+  if (Math.random() < 0.5) {
+    return { x: line + side * (CONFIG.roadWidth / 2 + 1.6), z: along, vertical: true, line };
+  }
+  return { x: along, z: line + side * (CONFIG.roadWidth / 2 + 1.6), vertical: false, line };
+}
+
+export function spawnPedestrians(city, count) {
+  const made = [];
+  for (let i = 0; i < count; i++) {
+    const mesh = buildFigure(pick(SHIRTS));
+    const start = sidewalkPoint(city);
+    mesh.position.set(start.x, 0, start.z);
+    const ped = {
+      mesh, kind: "ped",
+      health: 60,
+      state: "wander",
+      speed: range(1.1, 2.1),
+      heading: range(0, Math.PI * 2),
+      target: null,
+      timer: range(1, 5),
+      chatPartner: null,
+      walkPhase: range(0, 6),
+      alive: true,
+    };
+    // Pair up some pedestrians as chatters standing face to face.
+    if (i % 5 === 4 && made.length > 0) {
+      const partner = made[made.length - 1];
+      ped.state = "chat";
+      partner.state = "chat";
+      ped.chatPartner = partner;
+      partner.chatPartner = ped;
+      mesh.position.set(partner.mesh.position.x + 0.9, 0, partner.mesh.position.z + 0.4);
     }
-    if (gang) {
-      const band = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.1, 0.44), mat(0xff5722));
-      band.position.y = 1.94;
-      this.group.add(band);
+    people.push(ped);
+    made.push(ped);
+  }
+  return made;
+}
+
+export function getPeople() {
+  return people;
+}
+
+// A Coral Kings member (or other mission character) at a fixed spot.
+export function spawnGangMember(pos, color = 0xc23c4e) {
+  const mesh = buildFigure(color, { gang: color });
+  mesh.position.set(pos.x, 0, pos.z ?? pos.y ?? 0);
+  const member = {
+    mesh, kind: "gang",
+    health: 100,
+    state: "stand",
+    speed: 3.4,
+    heading: 0,
+    target: null,
+    timer: 0,
+    chatPartner: null,
+    walkPhase: 0,
+    alive: true,
+  };
+  people.push(member);
+  return member;
+}
+
+function scareCheck(ped, ctx) {
+  if (!ctx) return false;
+  const px = ped.mesh.position.x;
+  const pz = ped.mesh.position.z;
+  let danger = null;
+  if (ctx.lastShotAt && ctx.time - ctx.lastShotAt < 1.2 && ctx.shotPos) {
+    const dx = px - ctx.shotPos.x, dz = pz - ctx.shotPos.z;
+    if (dx * dx + dz * dz < 26 * 26) danger = ctx.shotPos;
+  }
+  if (ctx.lastCrashAt && ctx.time - ctx.lastCrashAt < 1 && ctx.crashPos) {
+    const dx = px - ctx.crashPos.x, dz = pz - ctx.crashPos.z;
+    if (dx * dx + dz * dz < 14 * 14) danger = ctx.crashPos;
+  }
+  if (danger) {
+    ped.state = Math.random() < 0.55 ? "flee" : "cower";
+    ped.timer = range(2, 4);
+    ped.heading = Math.atan2(px - danger.x, pz - danger.z);
+    return true;
+  }
+  return false;
+}
+
+export function updatePeople(dt, ctx) {
+  for (const ped of people) {
+    if (!ped.alive) continue;
+    const pos = ped.mesh.position;
+    scareCheck(ped, ctx);
+    ped.timer -= dt;
+
+    if (ped.state === "chat") {
+      if (ped.chatPartner && ped.chatPartner.alive) {
+        const p = ped.chatPartner.mesh.position;
+        ped.mesh.rotation.y = Math.atan2(p.x - pos.x, p.z - pos.z);
+      }
+      if (ped.timer <= 0 && Math.random() < 0.3) {
+        ped.state = "wander";
+        ped.timer = range(2, 6);
+        if (ped.chatPartner) ped.chatPartner.state = "wander";
+      }
+      continue;
     }
-    const limb = (w, h, c) => new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat(c));
-    this.armL = limb(0.16, 0.68, shirtColor); this.armL.position.set(-0.4, 1.14, 0);
-    this.armR = limb(0.16, 0.68, shirtColor); this.armR.position.set(0.4, 1.14, 0);
-    this.legL = limb(0.2, 0.78, legColor); this.legL.position.set(-0.16, 0.39, 0);
-    this.legR = limb(0.2, 0.78, legColor); this.legR.position.set(0.16, 0.39, 0);
-    // pivot limbs at their tops so swing looks like walking
-    for (const part of [this.armL, this.armR]) part.geometry.translate(0, -0.3, 0);
-    for (const part of [this.legL, this.legR]) part.geometry.translate(0, -0.34, 0);
-    this.armL.position.y = 1.44; this.armR.position.y = 1.44;
-    this.legL.position.y = 0.76; this.legR.position.y = 0.76;
-    this.group.add(this.armL, this.armR, this.legL, this.legR);
-    for (const part of [this.torso, this.head, this.armL, this.armR, this.legL, this.legR]) {
-      part.castShadow = true;
+    if (ped.state === "cower") {
+      ped.mesh.scale.y = 0.62;
+      if (ped.timer <= 0) { ped.state = "wander"; ped.mesh.scale.y = 1; }
+      continue;
     }
+    ped.mesh.scale.y = 1;
 
-    this.group.position.set(x, 0, z);
-    scene.add(this.group);
-    this.pos = this.group.position;
-    this.angle = 0;
-    this.health = gang ? 70 : 50;
-    this.maxHealth = this.health;
-    this.dead = false;
-    this.walkPhase = Math.random() * Math.PI * 2;
-    this.gang = gang;
-    this.officer = officer;
-    this.speedNow = 0;
-  }
-
-  /** Walk toward a point; swing limbs in proportion to speed. */
-  moveToward(dt, tx, tz, speed) {
-    const dx = tx - this.pos.x;
-    const dz = tz - this.pos.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist < 0.15) { this.speedNow = 0; this.animate(dt); return true; }
-    const targetAngle = Math.atan2(dx, dz);
-    let diff = targetAngle - this.angle;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    this.angle += THREE.MathUtils.clamp(diff, -7 * dt, 7 * dt);
-    const step = Math.min(speed * dt, dist);
-    this.pos.x += Math.sin(this.angle) * step;
-    this.pos.z += Math.cos(this.angle) * step;
-    this.speedNow = speed;
-    this.animate(dt);
-    return false;
-  }
-
-  animate(dt) {
-    this.group.rotation.y = this.angle;
-    if (this.dead) return;
-    this.walkPhase += dt * (2 + this.speedNow * 1.7);
-    const swing = Math.sin(this.walkPhase) * Math.min(0.65, this.speedNow * 0.13);
-    this.legL.rotation.x = swing;
-    this.legR.rotation.x = -swing;
-    this.armL.rotation.x = -swing * 0.8;
-    this.armR.rotation.x = swing * 0.8;
-  }
-
-  /** Point the gun arm at a target while aiming (player / gang). */
-  aimPose() {
-    this.armR.rotation.x = -Math.PI / 2 + 0.12;
-    this.armL.rotation.x = -Math.PI / 2 + 0.3;
-  }
-
-  damage(amount) {
-    if (this.dead) return true;
-    this.health -= amount;
-    if (this.health <= 0) {
-      this.dead = true;
-      this.group.rotation.x = Math.PI / 2;
-      this.group.position.y = 0.25;
-      return true;
+    if (ped.state === "flee") {
+      pos.x += Math.sin(ped.heading) * 4.6 * dt;
+      pos.z += Math.cos(ped.heading) * 4.6 * dt;
+      if (ped.timer <= 0) ped.state = "wander";
+    } else {
+      // Wander: pick short targets and stroll toward them.
+      if (!ped.target || ped.timer <= 0) {
+        ped.target = {
+          x: pos.x + range(-26, 26),
+          z: pos.z + range(-26, 26),
+        };
+        ped.timer = range(3, 7);
+      }
+      const dx = ped.target.x - pos.x;
+      const dz = ped.target.z - pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 0.6) {
+        ped.heading = Math.atan2(dx, dz);
+        pos.x += Math.sin(ped.heading) * ped.speed * dt;
+        pos.z += Math.cos(ped.heading) * ped.speed * dt;
+      }
     }
-    return false;
-  }
-
-  distanceTo(x, z) {
-    return Math.hypot(this.pos.x - x, this.pos.z - z);
+    // Keep pedestrians inside the city and out of the water.
+    const half = CONFIG.worldSize / 2 - 4;
+    pos.x = Math.max(-half, Math.min(CONFIG.beachX + 18, pos.x));
+    pos.z = Math.max(-half, Math.min(half, pos.z));
+    if (ctx?.city) resolveCollisions(ctx.city.colliders, pos, 0.45);
+    ped.mesh.rotation.y = ped.heading;
+    ped.walkPhase += dt * (ped.state === "flee" ? 13 : 7);
+    const swing = Math.sin(ped.walkPhase) * 0.45;
+    const legs = ped.mesh.userData.legs;
+    if (legs) {
+      legs[0].rotation.x = swing;
+      legs[1].rotation.x = -swing;
+    }
   }
 }
 
-export class CrowdManager {
-  constructor(scene, city, rng, count = 26) {
-    this.scene = scene;
-    this.city = city;
-    this.rng = rng;
-    this.pedestrians = [];
-    this.gangMembers = [];
-    for (let i = 0; i < count; i++) {
-      const ped = new Person(scene, {
-        x: 0, z: 0,
-        shirt: rng.pick(SHIRTS), pants: rng.pick(PANTS), skin: rng.pick(SKIN_TONES),
-      });
-      this.placeOnSidewalk(ped);
-      ped.brain = { target: null, wait: 0, panicUntil: 0, cower: false };
-      this.pedestrians.push(ped);
-    }
+// Remove a person from the world (shot, run over). Returns true if it died.
+export function hurtPerson(ped, damage) {
+  ped.health -= damage;
+  if (ped.health <= 0 && ped.alive) {
+    ped.alive = false;
+    ped.mesh.rotation.x = -Math.PI / 2;
+    ped.mesh.position.y = 0.25;
+    return true;
   }
-
-  placeOnSidewalk(person) {
-    const W = CFG.world;
-    const bx = this.rng.int(0, W.blocksPerSide - 1);
-    const bz = this.rng.int(0, W.blocksPerSide - 1);
-    const edge = W.blockSize / 2 + 2.6;
-    person.pos.x = blockCenter(bx) + this.rng.range(-edge, edge);
-    person.pos.z = blockCenter(bz) + (this.rng.chance(0.5) ? edge : -edge);
-  }
-
-  sidewalkTarget(fromPos) {
-    const W = CFG.world;
-    const bx = this.rng.int(0, W.blocksPerSide - 1);
-    const bz = this.rng.int(0, W.blocksPerSide - 1);
-    const edge = W.blockSize / 2 + 2.6;
-    return {
-      x: blockCenter(bx) + this.rng.range(-edge, edge),
-      z: blockCenter(bz) + this.rng.range(-edge, edge),
-    };
-  }
-
-  /** Panic spreads from a point: nearby peds flee, a few cower. */
-  scare(x, z, radius, nowSeconds) {
-    for (const ped of this.pedestrians) {
-      if (ped.dead) continue;
-      if (ped.distanceTo(x, z) < radius) {
-        ped.brain.panicUntil = nowSeconds + this.rng.range(2.5, 5);
-        ped.brain.cower = this.rng.chance(0.3);
-        ped.brain.target = null;
-        ped.brain.scareX = x;
-        ped.brain.scareZ = z;
-      }
-    }
-  }
-
-  update(dt, nowSeconds) {
-    for (const ped of this.pedestrians) {
-      if (ped.dead) continue;
-      const brain = ped.brain;
-      if (nowSeconds < brain.panicUntil) {
-        if (brain.cower) {
-          ped.speedNow = 0;
-          ped.group.scale.y = 0.72; // crouched down
-          ped.animate(dt);
-          continue;
-        }
-        ped.group.scale.y = 1;
-        // run directly away from the last scare origin stored on the brain
-        const awayX = ped.pos.x + (ped.pos.x - (brain.scareX ?? ped.pos.x - 1)) * 2;
-        const awayZ = ped.pos.z + (ped.pos.z - (brain.scareZ ?? ped.pos.z)) * 2;
-        ped.moveToward(dt, awayX, awayZ, 7.5);
-        this.city.resolveCollisions(ped.pos, 0.5);
-        continue;
-      }
-      ped.group.scale.y = 1;
-      if (brain.wait > 0) {
-        brain.wait -= dt;
-        ped.speedNow = 0;
-        ped.animate(dt);
-        continue;
-      }
-      if (!brain.target) brain.target = this.sidewalkTarget(ped.pos);
-      const arrived = ped.moveToward(dt, brain.target.x, brain.target.z, 2.1);
-      this.city.resolveCollisions(ped.pos, 0.5);
-      if (arrived) {
-        brain.target = null;
-        brain.wait = this.rng.range(0.5, 4);
-      }
-    }
-    // gang members are updated by missions/main combat code, but keep
-    // their idle animation ticking here when nobody is steering them
-    for (const member of this.gangMembers) {
-      if (!member.dead && !member.steered) member.animate(dt);
-      member.steered = false;
-    }
-  }
-
-  spawnGang(x, z, count) {
-    const spawned = [];
-    for (let i = 0; i < count; i++) {
-      const member = new Person(this.scene, {
-        x: x + this.rng.range(-6, 6),
-        z: z + this.rng.range(-6, 6),
-        gang: true,
-        skin: this.rng.pick(SKIN_TONES),
-      });
-      member.shootCooldown = this.rng.range(0.4, 1.4);
-      this.gangMembers.push(member);
-      spawned.push(member);
-    }
-    return spawned;
-  }
-
-  clearGang() {
-    for (const member of this.gangMembers) this.scene.remove(member.group);
-    this.gangMembers = [];
-  }
-
-  livingGang() {
-    return this.gangMembers.filter((m) => !m.dead);
-  }
+  ped.state = "flee";
+  ped.timer = 3;
+  return false;
 }

@@ -1,26 +1,30 @@
-/**
- * NEON HARBOR v2 — tiny static file server for local play.
- *
- * Serves the game/ folder over HTTP so the ES modules and the import map
- * load correctly (browsers refuse module scripts from file:// pages).
- * Standard library only. Usage:
- *
- *   node serve.ts            -> http://localhost:8080
- *   node serve.ts --port 9000
- *
- * The server refuses any request whose resolved path escapes the game
- * folder, answers 404 for missing files, and maps "/" to index.html.
- */
+// serve.ts — tiny static file server for NEON HARBOR.
+// Node standard library only. Run: node serve.ts [--port 8123]
+// Serves the game/ folder so the whole game runs offline in a browser.
 
 import { createServer } from "node:http";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { extname, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const rootDir = dirname(fileURLToPath(import.meta.url));
-const gameDir = resolve(join(rootDir, "game"));
+const here = resolve(fileURLToPath(new URL(".", import.meta.url)));
+const gameRoot = join(here, "game");
 
-const MIME_TYPES: Record<string, string> = {
+function parsePort(argv) {
+  let port = 8080;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--port" && argv[i + 1]) {
+      const n = Number(argv[i + 1]);
+      if (Number.isInteger(n) && n > 0 && n < 65536) port = n;
+    } else if (argv[i].startsWith("--port=")) {
+      const n = Number(argv[i].slice("--port=".length));
+      if (Number.isInteger(n) && n > 0 && n < 65536) port = n;
+    }
+  }
+  return port;
+}
+
+const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
@@ -31,48 +35,53 @@ const MIME_TYPES: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".gif": "image/gif",
   ".svg": "image/svg+xml",
+  ".webp": "image/webp",
   ".ico": "image/x-icon",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
   ".wasm": "application/wasm",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
   ".txt": "text/plain; charset=utf-8",
-  ".md": "text/plain; charset=utf-8",
 };
 
-function portFromArgs(argv: string[]): number {
-  const flagIndex = argv.indexOf("--port");
-  if (flagIndex >= 0 && argv[flagIndex + 1]) {
-    const parsed = Number.parseInt(argv[flagIndex + 1], 10);
-    if (Number.isFinite(parsed) && parsed > 0 && parsed < 65536) return parsed;
-  }
-  return 8080;
+function mimeFor(path) {
+  return MIME[extname(path).toLowerCase()] || "application/octet-stream";
 }
 
-const port = portFromArgs(process.argv.slice(2));
-
-const server = createServer((request, response) => {
-  const rawUrl = request.url ?? "/";
-  const urlPath = decodeURIComponent(rawUrl.split("?")[0]);
-  const wanted = urlPath === "/" ? "/index.html" : urlPath;
-
-  // Resolve inside the game folder and refuse anything that escapes it.
-  const filePath = resolve(join(gameDir, normalize(`.${wanted}`)));
-  if (!filePath.startsWith(gameDir)) {
-    response.writeHead(403, { "content-type": "text/plain" });
-    response.end("Forbidden");
-    return;
+const server = createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url || "/", "http://localhost");
+    let rel = decodeURIComponent(url.pathname);
+    if (rel === "/" || rel === "") rel = "/index.html";
+    // Normalise and refuse anything that escapes the game folder.
+    const target = normalize(join(gameRoot, rel));
+    if (target !== gameRoot && !target.startsWith(gameRoot + sep)) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("Forbidden");
+      return;
+    }
+    const info = await stat(target).catch(() => null);
+    if (!info || !info.isFile()) {
+      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.end("Not found: " + rel);
+      return;
+    }
+    const body = await readFile(target);
+    res.writeHead(200, {
+      "Content-Type": mimeFor(target),
+      "Content-Length": body.length,
+      "Cache-Control": "no-cache",
+    });
+    res.end(body);
+  } catch (err) {
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("Server error");
   }
-  if (!existsSync(filePath) || !statSync(filePath).isFile()) {
-    response.writeHead(404, { "content-type": "text/plain" });
-    response.end("Not found");
-    return;
-  }
-
-  const type = MIME_TYPES[extname(filePath).toLowerCase()] ?? "application/octet-stream";
-  response.writeHead(200, { "content-type": type, "cache-control": "no-store" });
-  response.end(readFileSync(filePath));
 });
 
+const port = parsePort(process.argv.slice(2));
 server.listen(port, () => {
-  console.log(`NEON HARBOR v2 is live at http://localhost:${port}`);
+  console.log(`[neon-harbor] serving game/ at http://localhost:${port}`);
 });

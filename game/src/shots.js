@@ -1,105 +1,98 @@
-// NEON HARBOR v2 — screenshot staging for the four hand-in stills.
-// Each scene is posed with the game's own systems (real cars, real
-// police, real gang members, real HUD) and only then flags readiness.
-// Nothing here draws or fakes a frame; it arranges a playable moment.
+// shots.js — screenshot staging for NEON HARBOR.
+// When the page URL carries ?shot=<name>, the game boots straight into a
+// composed, frozen frame for that scene, hides the HUD, and sets
+// window.__shotReady once the frame has rendered. Capture tooling waits
+// for that flag, so screenshots are deterministic.
 
-import { CFG } from "./config.js";
-import { roadCenter } from "./city.js";
+import * as THREE from "three";
+import { createVehicle } from "./vehicles.js";
+import { buildFigure } from "./people.js";
+import { setWeather } from "./weather.js";
 
-function avenueZ() {
-  // the central east-west avenue: road index 2 on the z axis
-  return roadCenter(2);
-}
-
-function poseTitle(game) {
-  game.setHour(17.6); // golden dusk over the bay
-  game.weather.setFront("clear");
-  const avenue = avenueZ();
-  // Rio stands on the bay-side road looking back at downtown
-  game.setPlayerOnFoot(CFG.world.half - 26, avenue + 3, -Math.PI / 2);
-  game.setShotCamera(
-    { x: CFG.world.half + 16, y: 9, z: avenue + 16 },
-    { x: -40, y: 16, z: avenue - 10 }
-  );
-  game.hud.showPanel("title");
-}
-
-function poseChase(game) {
-  game.setHour(17.25); // low sun, long shadows, lightbars lit
-  game.weather.setFront("clear");
-  game.startPlaying();
-  const avenue = avenueZ();
-  const car = game.vehicles.nearestParked(game.player.pos.x, game.player.pos.z, 500)
-    || game.vehicles.traffic[0];
-  game.moveVehicle(car, -70, avenue + 3.4, Math.PI / 2);
-  game.enterVehicle(car);
-  car.speed = 23;
-  game.police.addPoints(CFG.wanted.thresholds[3]); // exactly three stars
-  const copA = game.police.spawnCopCar(car.pos);
-  game.moveVehicle(copA, -88, avenue - 3.4, Math.PI / 2);
-  copA.speed = 21;
-  const copB = game.police.spawnCopCar(car.pos);
-  game.moveVehicle(copB, -97, avenue + 4.2, Math.PI / 2);
-  copB.speed = 20;
-  // Fixed camera ahead of the action, looking back west down the
-  // avenue: the player car bears down on it with both cop cars in
-  // frame behind. (The follow camera never shows the pursuers, and
-  // its lerp from the title orbit has not settled in time.)
-  game.setShotCamera(
-    { x: -52, y: 5.5, z: avenue + 9 },
-    { x: -78, y: 1.2, z: avenue + 1 }
-  );
-  const diner = game.city.landmarks.get("diner");
-  game.setObjectiveOverride("Deliver the takings to Mama Lala's Diner", { x: diner.door.x, z: diner.door.z });
-  game.hud.setWeapon("PISTOL");
-  game.hud.setRadio("♪ Harbour FM");
-}
-
-function poseStreet(game) {
-  game.setHour(17.7); // deep dusk: windows and lamps carry the street fight
-  game.weather.setFront("clear");
-  game.startPlaying();
-  const diner = game.city.landmarks.get("diner");
-  game.setPlayerOnFoot(diner.door.x - 3, diner.door.z + 6, Math.PI);
-  game.givePistol();
-  game.setAiming(true);
-  const gang = game.crowd.spawnGang(diner.door.x + 4, diner.door.z + 13, 3);
-  if (gang[0]) gang[0].damage(999); // one King already down
-  for (const member of gang) {
-    if (!member.dead) {
-      member.angle = Math.atan2(game.player.pos.x - member.pos.x, game.player.pos.z - member.pos.z);
-      member.aimPose();
-    }
+export function shotNameFromUrl() {
+  try {
+    return new URLSearchParams(window.location.search).get("shot");
+  } catch (err) {
+    return null;
   }
-  game.setObjectiveOverride("Clear the Coral Kings out of Toko Senjata Budi",
-    game.city.landmarks.get("arms").door);
-  game.hud.setWeapon("PISTOL");
 }
 
-function poseWash(game) {
-  game.setHour(17.55); // dusk: neon and windows on at the wash
-  game.weather.setFront("clear");
-  game.startPlaying();
-  const wash = game.city.landmarks.get("wash");
-  const car = game.vehicles.nearestParked(wash.door.x, wash.door.z, 500)
-    || game.vehicles.traffic[0];
-  game.moveVehicle(car, wash.door.x, wash.door.z + 2, Math.PI);
-  game.enterVehicle(car);
-  car.speed = 0;
-  game.police.addPoints(CFG.wanted.thresholds[2]); // exactly two stars
-  game.setObjectiveOverride("Respray at Splash & Go to lose the heat", { x: wash.door.x, z: wash.door.z });
-  game.hud.setPrompt(`<b>E</b> Respray — $${CFG.prices.respray} (clears wanted level)`);
+function placeCar(ctx, colorHex, kind, x, z, heading) {
+  const mesh = createVehicle(colorHex, kind);
+  mesh.position.set(x, 0, z);
+  mesh.rotation.y = heading;
+  ctx.scene.add(mesh);
+  return mesh;
 }
 
-const SCENES = { title: poseTitle, chase: poseChase, street: poseStreet, wash: poseWash };
+function placePerson(ctx, x, z, heading, shirt = 0xff5a7a) {
+  const mesh = buildFigure(shirt);
+  mesh.position.set(x, 0, z);
+  mesh.rotation.y = heading;
+  ctx.scene.add(mesh);
+  return mesh;
+}
 
-export function stageShot(game, sceneName) {
-  const pose = SCENES[sceneName] || SCENES.title;
-  pose(game);
-  // a couple of frames of simulation settle physics and HUD before capture
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      window.__shotReady = true;
-    });
-  });
+function aimCamera(ctx, pos, look) {
+  ctx.camera.position.set(pos.x, pos.y, pos.z);
+  ctx.camera.lookAt(look.x, look.y, look.z);
+  ctx.camera.updateProjectionMatrix();
+}
+
+export function initShots(ctx) {
+  const name = shotNameFromUrl();
+  if (!name) return false;
+  setWeather("clear");
+  document.body.classList.add("nh-shot-mode");
+  const hudEl = document.querySelector(".nh-hud");
+  if (hudEl) hudEl.style.display = "none";
+  const titleEl = document.getElementById("nh-title");
+  if (titleEl) titleEl.style.display = "none";
+
+  const heroColor = 0xd94f6a;
+  if (name === "title") {
+    // Hero car angled on the harbour road, skyline behind it.
+    placeCar(ctx, heroColor, "car", 236, -6, 0.7);
+    placePerson(ctx, 233.4, -3.4, 2.2, 0x2ee6e6);
+    aimCamera(ctx, { x: 228, y: 3.2, z: 6 }, { x: 238, y: 1.2, z: -10 });
+    // Park the live player far away so nothing wanders into frame.
+    ctx.parkPlayer?.(0, -300);
+  } else if (name === "street") {
+    placeCar(ctx, 0x3f7ad9, "car", -56, -80, 0);
+    placeCar(ctx, 0xf2b134, "car", -62, -60, Math.PI);
+    placePerson(ctx, -52.5, -70, -1.4, 0xf2b134);
+    placePerson(ctx, -67, -66, 1.2, 0x7ad95a);
+    ctx.parkPlayer?.(-60, -300);
+    aimCamera(ctx, { x: -48, y: 2.1, z: -52 }, { x: -60, y: 1.4, z: -84 });
+  } else if (name === "chase") {
+    placeCar(ctx, heroColor, "car", 120, 30, 0.5);
+    placeCar(ctx, 0xe8ecf2, "cop", 112, 16, 0.5);
+    placeCar(ctx, 0xe8ecf2, "cop", 128, 14, 0.35);
+    ctx.parkPlayer?.(0, -300);
+    aimCamera(ctx, { x: 104, y: 4.5, z: 48 }, { x: 122, y: 1, z: 24 });
+  } else if (name === "wash") {
+    // Inside the Splash & Go respray bay: fresh paint, cyan arch glow.
+    const wash = ctx.city.respray;
+    placeCar(ctx, 0x2ee6e6, "car", wash.x, wash.z, 0);
+    placePerson(ctx, wash.x + 4.5, wash.z + 3, -0.8, 0xe8e4da);
+    ctx.parkPlayer?.(0, -300);
+    aimCamera(
+      ctx,
+      { x: wash.x - 9, y: 3.4, z: wash.z + 11 },
+      { x: wash.x, y: 1, z: wash.z }
+    );
+  } else {
+    return false;
+  }
+
+  // Render a few frames so shadows and lights settle, then signal ready.
+  let frames = 0;
+  const settle = () => {
+    ctx.renderer.render(ctx.scene, ctx.camera);
+    frames++;
+    if (frames < 6) requestAnimationFrame(settle);
+    else window.__shotReady = true;
+  };
+  requestAnimationFrame(settle);
+  return true;
 }

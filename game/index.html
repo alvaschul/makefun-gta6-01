@@ -3,261 +3,158 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NEON HARBOR v2 — Azura Bay</title>
+<title>NEON HARBOR — Azura Bay</title>
 <style>
-  :root{
-    --nh-pink:#ff4d8d; --nh-cyan:#37e0d8; --nh-amber:#ffc857;
-    --nh-ink:#0b1020; --nh-paper:#f4f1e8; --nh-danger:#ff4757;
+  :root {
+    --nh-pink: #ff3d8a;
+    --nh-cyan: #2ee6e6;
+    --nh-amber: #ffb02e;
+    --nh-ink: #0d0a18;
   }
-  *{box-sizing:border-box; margin:0; padding:0;}
-  html,body{width:100%; height:100%; overflow:hidden; background:var(--nh-ink);
-    font-family:"Trebuchet MS","Segoe UI",Verdana,sans-serif; color:var(--nh-paper);}
-  #nh-stage{position:fixed; inset:0;}
-  #nh-stage canvas{display:block;}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--nh-ink); }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: #f2ede4;
+    user-select: none;
+  }
+  #nh-game { position: fixed; inset: 0; }
+  #nh-game canvas { display: block; }
 
-  /* ---------- HUD layer ---------- */
-  #nh-hud{position:fixed; inset:0; pointer-events:none; z-index:5;}
-  #nh-hud.nh-hidden{display:none;}
+  /* ---------- title screen ---------- */
+  #nh-title {
+    position: fixed; inset: 0; z-index: 40;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background:
+      radial-gradient(ellipse 90% 55% at 50% 108%, rgba(255, 140, 90, .55), transparent 60%),
+      radial-gradient(ellipse 70% 50% at 80% -10%, rgba(154, 92, 255, .4), transparent 60%),
+      linear-gradient(180deg, #17102e 0%, #2a1e3f 55%, #4a2440 100%);
+    text-align: center; padding: 24px;
+  }
+  #nh-title .nh-kicker {
+    letter-spacing: .45em; font-size: 13px; color: var(--nh-cyan);
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+  #nh-title h1 {
+    font-size: clamp(52px, 11vw, 110px); line-height: .95; font-weight: 900;
+    letter-spacing: .02em;
+    background: linear-gradient(92deg, var(--nh-pink) 5%, var(--nh-amber) 50%, var(--nh-cyan) 95%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: 0 0 42px rgba(255, 61, 138, .25);
+  }
+  #nh-title .nh-sub {
+    margin-top: 12px; font-size: clamp(14px, 2.4vw, 19px); color: #e8dcc8; max-width: 560px;
+  }
+  .nh-buttons { display: flex; gap: 14px; margin-top: 30px; flex-wrap: wrap; justify-content: center; }
+  .nh-buttons button {
+    font: inherit; font-weight: 700; font-size: 17px; cursor: pointer;
+    padding: 13px 34px; border-radius: 999px; border: 2px solid transparent;
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .nh-buttons button:hover { transform: translateY(-2px); }
+  #nh-new {
+    background: linear-gradient(92deg, var(--nh-pink), #ff7a3c); color: #fff;
+    box-shadow: 0 8px 28px rgba(255, 61, 138, .45);
+  }
+  #nh-continue {
+    background: transparent; color: var(--nh-cyan); border-color: var(--nh-cyan);
+  }
+  .nh-controls {
+    margin-top: 34px; display: grid; grid-template-columns: auto auto;
+    gap: 4px 18px; font-size: 13.5px; color: #bdb4d0; text-align: left;
+  }
+  .nh-controls b { color: #f2ede4; font-weight: 600; text-align: right; }
+  .nh-credit { margin-top: 26px; font-size: 12px; color: #8d84a8; letter-spacing: .08em; }
 
-  /* soft cinematic vignette over gameplay, plus the damage flash layer */
-  #nh-vignette{position:absolute; inset:0; pointer-events:none;
-    background:radial-gradient(ellipse at center, transparent 56%, rgba(3,5,14,.42) 100%);}
-  #nh-damage{position:absolute; inset:0; pointer-events:none; opacity:0;
-    background:radial-gradient(ellipse at center, transparent 52%, rgba(255,32,44,.6) 100%);}
-  #nh-damage.nh-flash{animation:nh-dmg-flash .55s ease-out;}
-  #nh-damage.nh-low{animation:nh-dmg-low 1.5s ease-in-out infinite alternate;}
-  @keyframes nh-dmg-flash{0%{opacity:.9;} 100%{opacity:0;}}
-  @keyframes nh-dmg-low{from{opacity:.18;} to{opacity:.45;}}
-
-  #nh-map-wrap{position:absolute; left:18px; bottom:18px; width:196px; height:196px;
-    border:3px solid rgba(55,224,216,.75); border-radius:50%; overflow:hidden;
-    background:rgba(6,14,24,.72);
-    box-shadow:0 0 24px rgba(55,224,216,.35), 0 0 52px rgba(255,77,141,.22), inset 0 0 18px rgba(0,0,0,.6);}
-  #nh-map{width:100%; height:100%;}
-
-  #nh-speed{position:absolute; left:226px; bottom:26px; padding:7px 16px 9px;
-    background:rgba(7,12,24,.55); border:1px solid rgba(55,224,216,.35); border-radius:12px;
-    backdrop-filter:blur(10px) saturate(1.35); -webkit-backdrop-filter:blur(10px) saturate(1.35);
-    box-shadow:0 6px 22px rgba(0,0,0,.35);}
-  #nh-speed-num{font-size:32px; font-weight:900; line-height:1; color:var(--nh-paper);
-    text-shadow:0 0 12px rgba(55,224,216,.65);}
-  .nh-speed-unit{font-size:11px; letter-spacing:.18em; text-transform:uppercase;
-    color:var(--nh-cyan); margin-left:6px;}
-
-  #nh-vitals{position:absolute; left:24px; bottom:224px; width:210px;}
-  .nh-bar{height:13px; border:1px solid rgba(244,241,232,.5); border-radius:7px;
-    background:rgba(5,8,18,.5); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
-    margin-top:6px; overflow:hidden; box-shadow:0 3px 12px rgba(0,0,0,.35);}
-  .nh-bar > div{height:100%; width:100%; transition:width .18s ease;}
-  #nh-hp-fill{background:linear-gradient(90deg,#ff5f6d,#ffc371); box-shadow:0 0 10px rgba(255,95,109,.7);}
-  #nh-ar-fill{background:linear-gradient(90deg,#37e0d8,#4d7cff); box-shadow:0 0 10px rgba(55,224,216,.7);}
-  .nh-bar-label{font-size:11px; letter-spacing:.14em; text-transform:uppercase; opacity:.9;
-    text-shadow:0 1px 4px rgba(0,0,0,.8);}
-
-  #nh-topright{position:absolute; right:20px; top:16px; text-align:right;}
-  #nh-cash{font-size:30px; font-weight:800; color:#7dff9a; text-shadow:0 2px 0 #063;}
-  #nh-stars{font-size:26px; letter-spacing:.18em; color:rgba(244,241,232,.25); min-height:32px;}
-  #nh-stars .nh-lit{color:var(--nh-amber); text-shadow:0 0 10px rgba(255,200,87,.9);}
-  #nh-stars.nh-pulse{animation:nh-star-pulse .55s ease-out;}
-  @keyframes nh-star-pulse{
-    0%{transform:scale(1);}
-    35%{transform:scale(1.28); filter:brightness(1.7) drop-shadow(0 0 14px rgba(255,200,87,.95));}
-    100%{transform:scale(1);}}
-  #nh-clock{font-size:15px; letter-spacing:.12em; opacity:.92; margin-top:2px;}
-  #nh-weather-tag{font-size:12px; letter-spacing:.12em; opacity:.75; text-transform:uppercase;}
-
-  #nh-objective{position:absolute; top:16px; left:50%; transform:translateX(-50%);
-    max-width:560px; text-align:center; background:rgba(7,12,24,.55);
-    backdrop-filter:blur(10px) saturate(1.35); -webkit-backdrop-filter:blur(10px) saturate(1.35);
-    border:1px solid rgba(55,224,216,.22); border-bottom:3px solid var(--nh-pink);
-    padding:9px 22px 11px; border-radius:0 0 12px 12px; box-shadow:0 8px 26px rgba(0,0,0,.35);}
-  #nh-objective .nh-obj-kicker{font-size:11px; letter-spacing:.3em; color:var(--nh-cyan); text-transform:uppercase;}
-  #nh-objective-text{font-size:17px; font-weight:700; margin-top:2px;}
-  #nh-timer{font-size:15px; color:var(--nh-amber); font-weight:700; min-height:19px;}
-  #nh-timer.nh-urgent{color:var(--nh-danger);}
-
-  #nh-toast{position:absolute; left:50%; bottom:148px; transform:translateX(-50%);
-    font-size:19px; font-weight:700; color:var(--nh-paper); background:rgba(7,12,24,.55);
-    backdrop-filter:blur(10px) saturate(1.35); -webkit-backdrop-filter:blur(10px) saturate(1.35);
-    border:1px solid rgba(255,200,87,.3); box-shadow:0 8px 26px rgba(0,0,0,.35);
-    padding:8px 20px; border-radius:20px; opacity:0; transition:opacity .35s ease; white-space:nowrap;}
-  #nh-toast.nh-show{opacity:1;}
-
-  #nh-bottomright{position:absolute; right:20px; bottom:18px; text-align:right;}
-  #nh-radio{font-size:14px; color:var(--nh-cyan); letter-spacing:.08em; min-height:18px;}
-  #nh-weapon{font-size:20px; font-weight:800; letter-spacing:.1em; margin-top:3px;}
-
-  #nh-cross{position:absolute; left:50%; top:50%; width:22px; height:22px;
-    transform:translate(-50%,-50%); display:none;}
-  #nh-cross::before,#nh-cross::after{content:""; position:absolute; background:var(--nh-paper);
-    box-shadow:0 0 4px #000;}
-  #nh-cross::before{left:50%; top:0; width:2px; height:100%; transform:translateX(-50%);}
-  #nh-cross::after{top:50%; left:0; height:2px; width:100%; transform:translateY(-50%);}
-  #nh-cross.nh-on{display:block;}
-
-  #nh-bust-wrap{position:absolute; left:50%; top:58%; transform:translateX(-50%);
-    width:280px; text-align:center; display:none;}
-  #nh-bust-wrap.nh-on{display:block;}
-  #nh-bust-wrap .nh-bust-label{color:var(--nh-danger); font-weight:800; letter-spacing:.3em; font-size:14px;}
-  #nh-bust-track{height:12px; border:2px solid var(--nh-danger); border-radius:6px; overflow:hidden; background:rgba(0,0,0,.5);}
-  #nh-bust-fill{height:100%; width:0%; background:var(--nh-danger);}
-
-  #nh-prompt{position:absolute; left:50%; bottom:96px; transform:translateX(-50%);
-    font-size:17px; background:rgba(7,12,24,.6); border:1px solid var(--nh-cyan);
-    backdrop-filter:blur(10px) saturate(1.35); -webkit-backdrop-filter:blur(10px) saturate(1.35);
-    box-shadow:0 0 18px rgba(55,224,216,.25), 0 8px 26px rgba(0,0,0,.35);
-    color:var(--nh-paper); padding:8px 18px; border-radius:10px; display:none;}
-  #nh-prompt.nh-on{display:block;}
-  #nh-prompt b{color:var(--nh-amber);}
-
-  #nh-dialogue{position:absolute; left:50%; bottom:26px; transform:translateX(-50%);
-    width:min(680px,92vw); background:rgba(7,12,24,.68);
-    border:1px solid rgba(55,224,216,.2); border-left:5px solid var(--nh-pink);
-    backdrop-filter:blur(12px) saturate(1.4); -webkit-backdrop-filter:blur(12px) saturate(1.4);
-    box-shadow:0 10px 30px rgba(0,0,0,.4);
-    border-radius:10px; padding:14px 20px 12px; display:none;}
-  #nh-dialogue.nh-on{display:block;}
-  #nh-dlg-name{color:var(--nh-pink); font-weight:800; letter-spacing:.12em; font-size:14px; text-transform:uppercase;}
-  #nh-dlg-text{font-size:18px; line-height:1.45; margin-top:4px; min-height:52px;}
-  #nh-dlg-hint{font-size:12px; opacity:.7; margin-top:6px; letter-spacing:.1em;}
-
-  /* ---------- Full-screen panels ---------- */
-  .nh-panel{position:fixed; inset:0; z-index:20; display:none; align-items:center; justify-content:center;
-    flex-direction:column; text-align:center; padding:24px;}
-  .nh-panel.nh-open{display:flex;}
-  #nh-panel-title{background:
-    radial-gradient(120% 90% at 50% 112%, rgba(255,77,141,.22), transparent 60%),
-    radial-gradient(90% 60% at 50% -10%, rgba(55,224,216,.14), transparent 60%),
-    linear-gradient(180deg,rgba(8,10,28,.16),rgba(8,10,28,.55) 55%,rgba(6,4,20,.86));}
-  .nh-game-title{font-size:min(84px,13vw); font-weight:900; letter-spacing:.04em; line-height:.95;
-    color:#fff7fa;
-    text-shadow:0 0 6px rgba(255,255,255,.75), 0 0 20px rgba(255,77,141,.95),
-      0 0 46px rgba(255,77,141,.8), 0 0 96px rgba(255,77,141,.55), 4px 4px 0 rgba(55,224,216,.30);
-    animation:nh-title-glow 3.4s ease-in-out infinite;}
-  .nh-game-title span{color:#c9fbf7;
-    text-shadow:0 0 6px rgba(255,255,255,.7), 0 0 20px rgba(55,224,216,.95),
-      0 0 46px rgba(55,224,216,.8), 0 0 96px rgba(55,224,216,.5), 4px 4px 0 rgba(255,77,141,.30);}
-  @keyframes nh-title-glow{0%,100%{filter:brightness(1);} 50%{filter:brightness(1.16);}}
-  .nh-game-sub{margin-top:10px; font-size:18px; letter-spacing:.34em; text-transform:uppercase;
-    color:var(--nh-cyan); text-shadow:0 0 14px rgba(55,224,216,.8);}
-  .nh-menu{margin-top:34px; display:flex; flex-direction:column; gap:12px; pointer-events:auto;}
-  .nh-btn{font:inherit; font-size:19px; font-weight:800; letter-spacing:.12em; cursor:pointer;
-    color:var(--nh-ink); background:var(--nh-amber); border:none; border-radius:10px; padding:13px 44px;
-    box-shadow:0 4px 0 #9c6d12; transition:transform .08s ease, filter .15s ease;}
-  .nh-btn:hover{filter:brightness(1.1);}
-  .nh-btn:active{transform:translateY(3px); box-shadow:0 1px 0 #9c6d12;}
-  .nh-btn.nh-ghost{background:transparent; color:var(--nh-paper); border:2px solid var(--nh-cyan); box-shadow:none;}
-  .nh-btn:disabled{opacity:.4; cursor:default;}
-  .nh-controls-card{margin-top:30px; background:rgba(7,12,24,.55); border-radius:12px; padding:14px 26px;
-    border:1px solid rgba(55,224,216,.22); box-shadow:0 10px 30px rgba(0,0,0,.4);
-    backdrop-filter:blur(10px) saturate(1.35); -webkit-backdrop-filter:blur(10px) saturate(1.35);
-    font-size:14px; line-height:1.75; text-align:left;}
-  .nh-controls-card b{color:var(--nh-amber); display:inline-block; min-width:118px;}
-  #nh-panel-pause{background:rgba(5,8,18,.78);}
-  #nh-panel-wasted{background:rgba(30,2,6,.72);}
-  #nh-panel-busted{background:rgba(2,10,34,.72);}
-  #nh-panel-complete{background:rgba(4,20,16,.78);}
-  .nh-big-word{font-size:min(76px,12vw); font-weight:900; letter-spacing:.14em;}
-  #nh-panel-wasted .nh-big-word{color:var(--nh-danger); text-shadow:0 0 30px rgba(255,71,87,.7);}
-  #nh-panel-busted .nh-big-word{color:#6db3ff; text-shadow:0 0 30px rgba(77,124,255,.7);}
-  #nh-panel-complete .nh-big-word{color:#7dff9a; text-shadow:0 0 30px rgba(55,224,216,.6);}
-  .nh-panel-note{margin-top:12px; font-size:17px; opacity:.92; max-width:520px; line-height:1.5;}
-  .nh-panel .nh-menu{pointer-events:auto;}
+  /* ---------- HUD (elements created by hud.js) ---------- */
+  .nh-hud { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
+  .nh-topleft { position: absolute; top: 16px; left: 18px; }
+  .nh-money {
+    font-size: 26px; font-weight: 800; color: #7be495;
+    text-shadow: 0 2px 10px rgba(0,0,0,.7);
+  }
+  .nh-healthwrap {
+    width: 190px; height: 11px; margin-top: 6px;
+    background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.35); border-radius: 6px;
+    overflow: hidden;
+  }
+  .nh-healthbar { height: 100%; width: 100%; background: #53c98a; transition: width .2s; }
+  .nh-stars { font-size: 21px; color: var(--nh-amber); margin-top: 4px; letter-spacing: 3px;
+    text-shadow: 0 2px 8px rgba(0,0,0,.8); }
+  .nh-objective {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    max-width: 62vw; text-align: center; font-size: 16.5px; font-weight: 600;
+    color: #ffe9b8; text-shadow: 0 2px 10px rgba(0,0,0,.85);
+    background: rgba(13,10,24,.45); padding: 8px 18px; border-radius: 999px;
+  }
+  .nh-toast {
+    position: absolute; top: 76px; left: 50%; transform: translateX(-50%);
+    font-size: 15.5px; color: #fff; background: rgba(13,10,24,.72);
+    padding: 9px 20px; border-radius: 10px; border: 1px solid rgba(46,230,230,.5);
+    transition: opacity .4s; white-space: nowrap;
+  }
+  .nh-dialogue {
+    position: absolute; bottom: 118px; left: 50%; transform: translateX(-50%);
+    width: min(620px, 86vw); background: rgba(10, 8, 20, .82);
+    border-left: 4px solid var(--nh-pink); border-radius: 8px; padding: 12px 18px;
+  }
+  .nh-speaker { color: var(--nh-cyan); font-weight: 700; font-size: 13px;
+    letter-spacing: .14em; text-transform: uppercase; margin-bottom: 3px; }
+  .nh-line { font-size: 16.5px; line-height: 1.45; }
+  .nh-bustwrap {
+    position: absolute; bottom: 210px; left: 50%; transform: translateX(-50%);
+    width: 240px; height: 12px; background: rgba(0,0,0,.6);
+    border: 1px solid #ff3c3c; border-radius: 6px; overflow: hidden;
+  }
+  .nh-bustbar { height: 100%; width: 0; background: #ff3c3c; }
+  .nh-minimap {
+    position: absolute; right: 16px; bottom: 16px; width: 176px; height: 176px;
+    border-radius: 12px; border: 2px solid rgba(46,230,230,.55);
+    box-shadow: 0 6px 24px rgba(0,0,0,.55); background: #141824;
+  }
+  .nh-overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; background: rgba(8,4,14,.62);
+  }
+  .nh-overlay-big {
+    font-size: clamp(44px, 9vw, 84px); font-weight: 900; letter-spacing: .12em;
+    color: #ff4757; text-shadow: 0 0 34px rgba(255,60,60,.6);
+  }
+  .nh-overlay-sub { margin-top: 10px; font-size: 16px; color: #e8dcc8; }
+  body.nh-shot-mode .nh-hud, body.nh-shot-mode #nh-title { display: none !important; }
 </style>
 <script type="importmap">
-{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js"
+  }
+}
 </script>
 </head>
 <body>
-<div id="nh-stage"></div>
+<div id="nh-game"></div>
 
-<div id="nh-hud" class="nh-hidden">
-  <div id="nh-vignette"></div>
-  <div id="nh-damage"></div>
-  <div id="nh-map-wrap"><canvas id="nh-map" width="196" height="196"></canvas></div>
-  <div id="nh-speed"><span id="nh-speed-num">0</span><span class="nh-speed-unit">km/h</span></div>
-  <div id="nh-vitals">
-    <div class="nh-bar-label">Health</div>
-    <div class="nh-bar"><div id="nh-hp-fill"></div></div>
-    <div class="nh-bar-label">Armour</div>
-    <div class="nh-bar"><div id="nh-ar-fill"></div></div>
+<section id="nh-title">
+  <div class="nh-kicker">Azura Bay &middot; Sunset District</div>
+  <h1>NEON<br>HARBOR</h1>
+  <p class="nh-sub">
+    Rio Santoso drives for Mama Lala to save his family's stall by the ferry
+    pier — while Bima &ldquo;Reef&rdquo; Prasetyo and the Coral Kings circle
+    the shoreline. Seven jobs. One harbour. No honest way out.
+  </p>
+  <div class="nh-buttons">
+    <button id="nh-new" type="button">New Game</button>
+    <button id="nh-continue" type="button">Continue</button>
   </div>
-  <div id="nh-topright">
-    <div id="nh-cash">$0</div>
-    <div id="nh-stars"></div>
-    <div id="nh-clock">08:00</div>
-    <div id="nh-weather-tag">Clear</div>
+  <div class="nh-controls">
+    <b>W A S D / Arrows</b><span>Walk &amp; drive</span>
+    <b>Shift</b><span>Run</span>
+    <b>E</b><span>Enter / exit vehicle, talk</span>
+    <b>Space</b><span>Handbrake</span>
+    <b>Mouse</b><span>Click to lock aim, click again to fire</span>
+    <b>P</b><span>Pause</span>
   </div>
-  <div id="nh-objective">
-    <div class="nh-obj-kicker">Objective</div>
-    <div id="nh-objective-text">Explore Azura Bay</div>
-    <div id="nh-timer"></div>
-  </div>
-  <div id="nh-toast"></div>
-  <div id="nh-bottomright">
-    <div id="nh-radio"></div>
-    <div id="nh-weapon">FISTS</div>
-  </div>
-  <div id="nh-cross"></div>
-  <div id="nh-bust-wrap">
-    <div class="nh-bust-label">BUSTED</div>
-    <div id="nh-bust-track"><div id="nh-bust-fill"></div></div>
-  </div>
-  <div id="nh-prompt"></div>
-  <div id="nh-dialogue">
-    <div id="nh-dlg-name">Mama Lala</div>
-    <div id="nh-dlg-text"></div>
-    <div id="nh-dlg-hint">Press E to continue</div>
-  </div>
-</div>
-
-<section id="nh-panel-title" class="nh-panel nh-open">
-  <div class="nh-game-title">NEON <span>HARBOR</span></div>
-  <div class="nh-game-sub">Azura Bay &middot; v2</div>
-  <div class="nh-menu">
-    <button id="nh-btn-new" class="nh-btn" type="button">NEW GAME</button>
-    <button id="nh-btn-continue" class="nh-btn nh-ghost" type="button">CONTINUE</button>
-  </div>
-  <div class="nh-controls-card">
-    <div><b>W A S D</b> move / drive</div>
-    <div><b>Mouse</b> look &middot; hold Shift to aim, click to shoot</div>
-    <div><b>Shift</b> sprint on foot</div>
-    <div><b>E / F</b> enter car, interact, talk</div>
-    <div><b>R</b> radio (in car) &middot; <b>M</b> mute &middot; <b>Esc</b> pause</div>
-  </div>
-</section>
-
-<section id="nh-panel-pause" class="nh-panel">
-  <div class="nh-big-word">PAUSED</div>
-  <p class="nh-panel-note">The harbour waits for no one, Rio.</p>
-  <div class="nh-menu">
-    <button id="nh-btn-resume" class="nh-btn" type="button">RESUME</button>
-    <button id="nh-btn-quit-title" class="nh-btn nh-ghost" type="button">QUIT TO TITLE</button>
-  </div>
-</section>
-
-<section id="nh-panel-wasted" class="nh-panel">
-  <div class="nh-big-word">WASTED</div>
-  <p class="nh-panel-note" id="nh-wasted-note">Santa Rosa Hospital patched you up and sent the bill.</p>
-  <div class="nh-menu">
-    <button id="nh-btn-respawn-hospital" class="nh-btn" type="button">LEAVE HOSPITAL</button>
-  </div>
-</section>
-
-<section id="nh-panel-busted" class="nh-panel">
-  <div class="nh-big-word">BUSTED</div>
-  <p class="nh-panel-note" id="nh-busted-note">The precinct took its fine. Your wheels stay impounded.</p>
-  <div class="nh-menu">
-    <button id="nh-btn-respawn-precinct" class="nh-btn" type="button">WALK OUT</button>
-  </div>
-</section>
-
-<section id="nh-panel-complete" class="nh-panel">
-  <div class="nh-big-word">HARBOR KING</div>
-  <p class="nh-panel-note" id="nh-complete-note">The Coral Kings are finished and Azura Bay is yours, Rio. Courier work is still on the board at the diner whenever you want it.</p>
-  <div class="nh-menu">
-    <button id="nh-btn-free-roam" class="nh-btn" type="button">KEEP ROAMING</button>
-  </div>
+  <div class="nh-credit">A tiny open-world crime story &middot; runs fully offline</div>
 </section>
 
 <script type="module" src="./src/main.js"></script>

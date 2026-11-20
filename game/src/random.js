@@ -1,55 +1,39 @@
-// NEON HARBOR v2 — seeded random generator.
-// A mulberry32 core keeps the whole city reproducible from one seed, which
-// is what shot mode relies on: same seed, same city, same staged frame.
+// random.js — small seeded random number generator.
+// A mulberry32 core keeps city generation and traffic placement identical
+// between runs for a given seed, which makes screenshots reproducible.
 
-export class RNG {
-  constructor(seed = 1234) {
-    this.state = (seed >>> 0) || 1;
-  }
+let state = 0x9e3779b9;
 
-  /** Next float in [0, 1). */
-  next() {
-    this.state = (this.state + 0x6d2b79f5) >>> 0;
-    let t = this.state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  }
-
-  /** Float in [min, max). */
-  range(min, max) {
-    return min + this.next() * (max - min);
-  }
-
-  /** Integer in [min, max] inclusive. */
-  int(min, max) {
-    return Math.floor(this.range(min, max + 1));
-  }
-
-  /** Random element of an array. */
-  pick(list) {
-    return list[Math.floor(this.next() * list.length)];
-  }
-
-  /** True with probability p. */
-  chance(p) {
-    return this.next() < p;
-  }
-
-  /** Random sign, -1 or +1. */
-  sign() {
-    return this.next() < 0.5 ? -1 : 1;
-  }
+export function setSeed(n) {
+  state = (Number(n) >>> 0) || 0x9e3779b9;
 }
 
-export function createRNG(seed) {
-  return new RNG(seed);
+// Next float in [0, 1).
+export function random() {
+  state = (state + 0x6d2b79f5) >>> 0;
+  let t = state;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 
-/** The shared world generator; main.js reseeds it in shot mode. */
-export const worldRNG = new RNG(20261119);
+// Float in [a, b).
+export function range(a, b) {
+  return a + random() * (b - a);
+}
 
-export function reseedWorldRNG(seed) {
-  worldRNG.state = (seed >>> 0) || 1;
-  return worldRNG;
+// Integer in [a, b] inclusive.
+export function intRange(a, b) {
+  return Math.floor(range(a, b + 1));
+}
+
+// Random element of an array (undefined for an empty array).
+export function pick(arr) {
+  if (!arr || arr.length === 0) return undefined;
+  return arr[Math.floor(random() * arr.length)];
+}
+
+// True with probability p.
+export function chance(p) {
+  return random() < p;
 }
